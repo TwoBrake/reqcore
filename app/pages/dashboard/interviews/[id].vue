@@ -694,7 +694,7 @@ async function retryDelivery() {
 
     <!-- Reschedule Modal -->
     <Teleport to="body">
-      <div v-if="showReschedule" class="fixed inset-0 z-50 flex items-center justify-center">
+      <div v-if="showReschedule && interview" class="fixed inset-0 z-50 flex items-center justify-center">
         <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="showReschedule = false" />
         <div class="relative bg-white dark:bg-surface-900 rounded-2xl shadow-2xl shadow-surface-900/10 dark:shadow-black/30 ring-1 ring-surface-200/80 dark:ring-surface-700/60 p-6 max-w-md w-full mx-4">
           <h3 class="text-lg font-semibold text-surface-900 dark:text-surface-100 mb-4">Reschedule Interview</h3>
