@@ -9,6 +9,7 @@ export interface Interview {
   duration: number
   location: string | null
   notes: string | null
+  personalNote: string | null
   interviewers: string[] | null
   invitationSentAt: string | null
   candidateResponse: 'pending' | 'accepted' | 'declined' | 'tentative'
@@ -16,6 +17,18 @@ export interface Interview {
   googleCalendarEventId: string | null
   googleCalendarEventLink: string | null
   timezone: string
+  latestDelivery?: {
+    id: string
+    kind: 'message' | 'interview_proposal' | 'interview_update' | 'interview_cancellation' | 'interview_response'
+    status: 'queued' | 'sent' | 'delivered' | 'delayed' | 'bounced' | 'failed' | 'complained'
+    calendarAttachmentStatus: 'not_applicable' | 'attached' | 'failed'
+    calendarAttachmentError: string | null
+    errorCode: string | null
+    errorMessage: string | null
+    sentAt: string | null
+    deliveredAt: string | null
+    failedAt: string | null
+  } | null
   applicationId: string
   candidateId: string
   candidateFirstName: string
@@ -26,6 +39,75 @@ export interface Interview {
   jobTitle: string
   createdAt: string
   updatedAt: string
+}
+
+export interface InterviewDelivery {
+  messageId: string
+  conversationId: string
+  messageStatus: 'sent' | 'failed'
+  calendarAttachmentStatus: 'attached' | 'failed'
+  errorCode: string | null
+  errorMessage: string | null
+  manualFallback: { to: string, subject: string, body: string } | null
+}
+
+export interface InterviewMutationResult {
+  id: string
+  status: Interview['status']
+  delivery: InterviewDelivery | null
+  notification: {
+    intent: 'proposal' | 'update' | 'cancellation' | null
+    attempted: boolean
+    status: 'sent' | 'failed' | 'not_required'
+    messageId: string | null
+    reason: 'no_prior_invitation' | 'internal_status_only' | null
+  }
+}
+
+export function useInterviewMutationFeedback() {
+  const toast = useToast()
+
+  function reportStatus(status: Interview['status'], result: InterviewMutationResult, candidateEmail: string) {
+    if (status === 'cancelled') {
+      if (result.delivery?.messageStatus === 'failed') {
+        toast.error('Interview cancelled, cancellation not sent', {
+          message: result.delivery.errorMessage ?? 'Retry the cancellation from the interview or candidate conversation.',
+        })
+      }
+      else if (result.delivery?.messageStatus === 'sent') {
+        toast.success('Interview cancelled', `Cancellation sent to ${candidateEmail}.`)
+      }
+      else {
+        toast.success('Interview cancelled', 'The candidate was not notified because no interview proposal had been sent.')
+      }
+      return
+    }
+
+    if (status === 'no_show') {
+      toast.success('Marked as no-show', 'Internal status only. The candidate was not notified.')
+      return
+    }
+
+    if (status === 'completed') {
+      toast.success('Interview completed', 'Internal status only. The candidate was not notified.')
+    }
+  }
+
+  function reportCandidateUpdate(result: InterviewMutationResult, candidateEmail: string, label = 'Interview updated') {
+    if (result.delivery?.messageStatus === 'failed') {
+      toast.error(`${label}, candidate update not sent`, {
+        message: result.delivery.errorMessage ?? 'Retry the update from the interview or candidate conversation.',
+      })
+    }
+    else if (result.delivery?.messageStatus === 'sent') {
+      toast.success(label, `Update sent to ${candidateEmail}.`)
+    }
+    else {
+      toast.success(label, 'No candidate message was required.')
+    }
+  }
+
+  return { reportStatus, reportCandidateUpdate }
 }
 
 interface InterviewListResponse {
@@ -103,6 +185,7 @@ export function useInterviews(options?: {
     duration?: number
     location?: string
     notes?: string
+    personalNote?: string
     interviewers?: string[]
     timezone?: string
   }) {
@@ -127,10 +210,11 @@ export function useInterviews(options?: {
     duration: number
     location: string | null
     notes: string | null
+    personalNote: string | null
     interviewers: string[] | null
   }>) {
     try {
-      const updated = await $fetch(`/api/interviews/${id}`, {
+      const updated = await $fetch<InterviewMutationResult>(`/api/interviews/${id}`, {
         method: 'PATCH',
         body: payload,
       })
@@ -178,10 +262,11 @@ export function useInterview(id: MaybeRefOrGetter<string>) {
     duration: number
     location: string | null
     notes: string | null
+    personalNote: string | null
     interviewers: string[] | null
   }>) {
     try {
-      const updated = await $fetch(`/api/interviews/${interviewId.value}`, {
+      const updated = await $fetch<InterviewMutationResult>(`/api/interviews/${interviewId.value}`, {
         method: 'PATCH',
         body: payload,
       })

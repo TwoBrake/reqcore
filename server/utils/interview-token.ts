@@ -1,27 +1,32 @@
 /**
  * HMAC-signed tokens for candidate interview responses.
  *
- * Tokens encode {interviewId, action, exp} and are signed with
+ * Tokens encode {interviewId, purpose, exp} and are signed with
  * BETTER_AUTH_SECRET using HMAC-SHA256. This allows candidates to
- * accept/decline/tentative an interview via a simple link — no
+ * respond to an interview via a simple link — no
  * authentication required, no inbound email infrastructure needed.
  */
 import { createHmac, timingSafeEqual } from 'node:crypto'
 
-export type CandidateAction = 'accepted' | 'declined' | 'tentative'
-
-const VALID_ACTIONS: CandidateAction[] = ['accepted', 'declined', 'tentative']
-
 /** Default token expiry: 7 days */
 const DEFAULT_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000
+const TOKEN_PURPOSE = 'interview_response'
+const LEGACY_ACTIONS = ['accepted', 'declined', 'tentative']
 
 interface TokenPayload {
   /** Interview UUID */
   id: string
-  /** Response action */
-  action: CandidateAction
+  /** Prevents this token from being used by another signed-link flow */
+  purpose: typeof TOKEN_PURPOSE
   /** Expiry timestamp (ms since epoch) */
   exp: number
+}
+
+interface DecodedTokenPayload {
+  id?: unknown
+  purpose?: unknown
+  action?: unknown
+  exp?: unknown
 }
 
 /**
@@ -34,18 +39,17 @@ function sign(payload: string, secret: string): string {
 /**
  * Generate a signed interview response token.
  *
- * Token format: base64url({id, action, exp}).signature
+ * Token format: base64url({id, purpose, exp}).signature
  * The signature prevents tampering; expiry prevents indefinite reuse.
  */
 export function generateInterviewToken(
   interviewId: string,
-  action: CandidateAction,
   secret: string,
   expiryMs: number = DEFAULT_EXPIRY_MS,
 ): string {
   const payload: TokenPayload = {
     id: interviewId,
-    action,
+    purpose: TOKEN_PURPOSE,
     exp: Date.now() + expiryMs,
   }
 
@@ -73,17 +77,18 @@ export function verifyInterviewToken(
   const expectedSig = sign(payloadStr, secret)
   if (providedSig.length !== expectedSig.length) return null
 
-  const sigValid = timingSafeEqual(
-    Buffer.from(providedSig, 'hex'),
-    Buffer.from(expectedSig, 'hex'),
-  )
+  const providedSigBuffer = Buffer.from(providedSig, 'hex')
+  const expectedSigBuffer = Buffer.from(expectedSig, 'hex')
+  if (providedSigBuffer.length !== expectedSigBuffer.length) return null
+
+  const sigValid = timingSafeEqual(providedSigBuffer, expectedSigBuffer)
   if (!sigValid) return null
 
   // Decode and validate payload
-  let payload: TokenPayload
+  let decodedPayload: DecodedTokenPayload
   try {
     const decoded = Buffer.from(payloadStr, 'base64url').toString('utf-8')
-    payload = JSON.parse(decoded) as TokenPayload
+    decodedPayload = JSON.parse(decoded) as DecodedTokenPayload
   }
   catch {
     return null
@@ -91,34 +96,35 @@ export function verifyInterviewToken(
 
   // Validate structure
   if (
-    typeof payload.id !== 'string'
-    || !VALID_ACTIONS.includes(payload.action)
-    || typeof payload.exp !== 'number'
+    typeof decodedPayload.id !== 'string'
+    || typeof decodedPayload.exp !== 'number'
   ) {
     return null
   }
 
-  // Check expiry
-  if (Date.now() > payload.exp) return null
+  // Action-bound tokens were sent before the flow moved to one neutral link.
+  const isLegacyResponseToken = typeof decodedPayload.action === 'string'
+    && LEGACY_ACTIONS.includes(decodedPayload.action)
+  if (decodedPayload.purpose !== TOKEN_PURPOSE && !isLegacyResponseToken) return null
 
-  return payload
+  // Check expiry
+  if (Date.now() > decodedPayload.exp) return null
+
+  return {
+    id: decodedPayload.id,
+    purpose: TOKEN_PURPOSE,
+    exp: decodedPayload.exp,
+  }
 }
 
 /**
- * Build the three response URLs (accept, decline, tentative) for an interview.
+ * Build the candidate response URL for an interview.
  */
-export function buildResponseUrls(
+export function buildResponseUrl(
   baseUrl: string,
   interviewId: string,
   secret: string,
-): Record<CandidateAction, string> {
-  const actions: CandidateAction[] = ['accepted', 'declined', 'tentative']
-  const urls = {} as Record<CandidateAction, string>
-
-  for (const action of actions) {
-    const token = generateInterviewToken(interviewId, action, secret)
-    urls[action] = `${baseUrl}/interview/respond?token=${encodeURIComponent(token)}`
-  }
-
-  return urls
+): string {
+  const token = generateInterviewToken(interviewId, secret)
+  return `${baseUrl}/interview/respond?token=${encodeURIComponent(token)}`
 }

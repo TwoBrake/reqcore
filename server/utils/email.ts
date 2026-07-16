@@ -5,12 +5,20 @@ import type { Transporter } from 'nodemailer'
 // ─── Resend client ────────────────────────────────────────────────────────────
 
 let _resend: Resend | undefined
+let _resendReceiving: Resend | undefined
 
-function getResendClient(): Resend | null {
+export function getResendClient(): Resend | null {
   const apiKey = env.RESEND_API_KEY
   if (!apiKey) return null
   if (!_resend) _resend = new Resend(apiKey)
   return _resend
+}
+
+export function getResendReceivingClient(): Resend | null {
+  const apiKey = env.RESEND_RECEIVING_API_KEY
+  if (!apiKey) return null
+  if (!_resendReceiving) _resendReceiving = new Resend(apiKey)
+  return _resendReceiving
 }
 
 // ─── SMTP transporter ─────────────────────────────────────────────────────────
@@ -121,6 +129,93 @@ async function sendEmail(msg: EmailMessage): Promise<void> {
 
   // 3. No provider configured — dev/test fallback
   console.info(`[Reqcore] ${msg.logFallback}`)
+}
+
+export interface CandidateMessageEmailResult {
+  id: string
+  from: string
+}
+
+function safeEmailDisplayName(value: string): string {
+  return value.replace(/[\r\n<>"]/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+export function formatCandidateMessageSender(senderName: string, configuredFrom: string): string {
+  const mailbox = configuredFrom.match(/<([^<>]+)>/)?.[1] ?? configuredFrom
+  const name = safeEmailDisplayName(senderName) || 'Recruiter'
+  return `${name} <${mailbox.trim()}>`
+}
+
+export function candidateMessageReplyHint(senderName: string): string {
+  const name = safeEmailDisplayName(senderName)
+  return name
+    ? `Reply directly to this email to respond to ${name}.`
+    : 'Reply directly to this email to continue the conversation.'
+}
+
+/**
+ * Candidate conversations are deliberately Resend-only. Arbitrary SMTP cannot
+ * provide the inbound routing, signed events, and provider identities required
+ * to make a two-way inbox dependable.
+ */
+export async function sendCandidateMessageEmail(params: {
+  to: string
+  subject: string
+  text: string
+  replyTo: string
+  senderName: string
+  idempotencyKey: string
+  inReplyTo?: string | null
+  references?: string[] | null
+  organizationId: string
+  conversationId: string
+  messageId: string
+  actionLinks?: Array<{ label: string, url: string, emphasis?: boolean }>
+  attachments?: Array<{ filename: string, content: string, contentType: string }>
+}): Promise<CandidateMessageEmailResult> {
+  const resend = getResendClient()
+  if (!resend) throw new Error('Candidate messaging requires RESEND_API_KEY')
+
+  const headers: Record<string, string> = {}
+  if (params.inReplyTo) headers['In-Reply-To'] = params.inReplyTo
+  if (params.references?.length) headers.References = params.references.join(' ')
+
+  const from = formatCandidateMessageSender(params.senderName, env.RESEND_CANDIDATE_FROM_EMAIL)
+  const replyHint = candidateMessageReplyHint(params.senderName)
+  const actionsHtml = params.actionLinks?.length
+    ? `<div style="margin:0 0 20px;text-align:left">${params.actionLinks.map(action => (
+        `<a href="${escapeHtml(action.url)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin:0 8px 0 0;padding:12px 20px;border-radius:6px;text-decoration:none;font-family:Arial,sans-serif;font-size:14px;line-height:1.2;font-weight:600;${action.emphasis ? 'background:#2563eb;color:#fff' : 'border:1px solid #d4d4d8;color:#27272a'}">${escapeHtml(action.label)}</a>`
+      )).join('')}</div>`
+    : ''
+  const actionsText = params.actionLinks?.length
+    ? params.actionLinks.map(action => `${action.label}: ${action.url}`).join('\n')
+    : ''
+  const { data, error } = await resend.emails.send({
+    from,
+    to: [params.to],
+    subject: params.subject,
+    text: [actionsText, params.text, replyHint].filter(Boolean).join('\n\n'),
+    html: [
+      actionsHtml,
+      `<div style="white-space:pre-wrap;font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#18181b">${escapeHtml(params.text)}</div>`,
+      `<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #e4e4e7;font-family:Arial,sans-serif;font-size:13px;line-height:1.5;color:#71717a">${escapeHtml(replyHint)}</p>`,
+    ].join(''),
+    replyTo: params.replyTo,
+    ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    ...(params.attachments?.length ? { attachments: params.attachments } : {}),
+    tags: [
+      { name: 'category', value: 'candidate-message' },
+      { name: 'organization', value: params.organizationId },
+      { name: 'conversation', value: params.conversationId },
+      { name: 'message', value: params.messageId },
+    ],
+  }, { idempotencyKey: params.idempotencyKey })
+
+  if (error || !data?.id) {
+    throw new Error(error?.message ?? 'Resend did not return a message ID')
+  }
+
+  return { id: data.id, from }
 }
 
 // ─── Public send functions ────────────────────────────────────────────────────
@@ -479,12 +574,8 @@ export interface InterviewEmailData {
   interviewLocation: string | null
   interviewers: string[] | null
   organizationName: string
-  /** Response URLs for accept/decline/tentative (omitted = no response links) */
-  responseUrls?: {
-    accepted: string
-    declined: string
-    tentative: string
-  }
+  /** Candidate response URL (omitted = no response link) */
+  responseUrl?: string
   /** iCalendar (.ics) file content to attach */
   icsContent?: string
 }
@@ -534,7 +625,7 @@ export async function sendInterviewInvitationEmail(params: {
     to: params.data.candidateEmail,
     subject: renderedSubject,
     html: buildInterviewInvitationHtml(renderedSubject, renderedBody, params.data),
-    text: buildInterviewInvitationText(renderedBody, params.data.responseUrls),
+    text: buildInterviewInvitationText(renderedBody, params.data.responseUrl),
     icsAttachment: icsBuffer,
     resendTags: [
       { name: 'category', value: 'interview-invitation' },
@@ -546,7 +637,7 @@ export async function sendInterviewInvitationEmail(params: {
       `Interview: ${params.data.interviewTitle} | ` +
       `Date: ${params.data.interviewDate} at ${params.data.interviewTime}` +
       (params.data.icsContent ? ' | .ics attached' : '') +
-      (params.data.responseUrls ? ' | response links included' : ''),
+      (params.data.responseUrl ? ' | response link included' : ''),
     errorCategory: 'email.interview_invitation_send_failed',
   })
 }
@@ -555,14 +646,14 @@ function buildInterviewInvitationHtml(subject: string, bodyText: string, data: I
   const bodyHtml = escapeHtml(bodyText).replace(/\n/g, '<br />')
 
   // Build response buttons HTML when URLs are available
-  const responseButtonsHtml = data.responseUrls
+  const responseButtonsHtml = data.responseUrl
     ? `
           <!-- Response Buttons -->
           <tr>
             <td style="padding:0 32px 32px;">
               <div style="border-top:1px solid #e4e4e7;padding-top:24px;">
                 <p style="margin:0 0 16px;font-size:14px;font-weight:600;color:#09090b;text-align:center;">
-                  Can you make it?
+                  Please respond to this invitation
                 </p>
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
                   <tr>
@@ -570,21 +661,9 @@ function buildInterviewInvitationHtml(subject: string, bodyText: string, data: I
                       <table role="presentation" cellpadding="0" cellspacing="0">
                         <tr>
                           <td style="padding:0 4px;">
-                            <a href="${escapeHtml(data.responseUrls.accepted)}" target="_blank" rel="noopener noreferrer"
-                               style="display:inline-block;padding:10px 20px;background-color:#16a34a;color:#ffffff;text-decoration:none;font-size:13px;font-weight:600;border-radius:6px;line-height:1;">
-                              &#10003; Accept
-                            </a>
-                          </td>
-                          <td style="padding:0 4px;">
-                            <a href="${escapeHtml(data.responseUrls.tentative)}" target="_blank" rel="noopener noreferrer"
-                               style="display:inline-block;padding:10px 20px;background-color:#ca8a04;color:#ffffff;text-decoration:none;font-size:13px;font-weight:600;border-radius:6px;line-height:1;">
-                              &#63; Maybe
-                            </a>
-                          </td>
-                          <td style="padding:0 4px;">
-                            <a href="${escapeHtml(data.responseUrls.declined)}" target="_blank" rel="noopener noreferrer"
-                               style="display:inline-block;padding:10px 20px;background-color:#dc2626;color:#ffffff;text-decoration:none;font-size:13px;font-weight:600;border-radius:6px;line-height:1;">
-                              &#10005; Decline
+                            <a href="${escapeHtml(data.responseUrl)}" target="_blank" rel="noopener noreferrer"
+                               style="display:inline-block;padding:11px 20px;background-color:#2563eb;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;border-radius:6px;line-height:1;">
+                              Respond to invitation
                             </a>
                           </td>
                         </tr>
@@ -644,19 +723,15 @@ function buildInterviewInvitationHtml(subject: string, bodyText: string, data: I
  */
 function buildInterviewInvitationText(
   renderedBody: string,
-  responseUrls?: InterviewEmailData['responseUrls'],
+  responseUrl?: InterviewEmailData['responseUrl'],
 ): string {
-  if (!responseUrls) return renderedBody
+  if (!responseUrl) return renderedBody
 
   return [
     renderedBody,
     '',
     '─────────────────────────────',
-    'Respond to this invitation:',
-    '',
-    `✓ Accept: ${responseUrls.accepted}`,
-    `? Maybe:  ${responseUrls.tentative}`,
-    `✗ Decline: ${responseUrls.declined}`,
+    `Respond to invitation: ${responseUrl}`,
     '',
     '─────────────────────────────',
   ].join('\n')

@@ -1,14 +1,16 @@
-import { eq } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import { z } from 'zod'
-import { interview } from '../../../database/schema'
+import { application, candidateConversation, candidateMessage, interview } from '../../../database/schema'
+import { normalizeEmailAddress, replySubject } from '../../../../ee/server/utils/candidate-messaging'
 import { verifyInterviewToken } from '../../../utils/interview-token'
 
 const respondBodySchema = z.object({
   token: z.string().min(1, 'Token is required'),
+  action: z.enum(['accepted', 'declined', 'tentative']),
 })
 
 /**
- * POST /api/public/interviews/respond  { token: "xxx" }
+ * POST /api/public/interviews/respond  { token: "xxx", action: "accepted" }
  *
  * Public endpoint for candidates to confirm their interview response.
  * Updates candidateResponse + candidateRespondedAt in the database.
@@ -17,6 +19,7 @@ const respondBodySchema = z.object({
 export default defineEventHandler(async (event) => {
   const body = await readValidatedBody(event, respondBodySchema.parse)
   const token = body.token
+  const action = body.action
 
   const payload = verifyInterviewToken(token, env.BETTER_AUTH_SECRET)
   if (!payload) {
@@ -40,7 +43,7 @@ export default defineEventHandler(async (event) => {
   }
 
   // Idempotency: if already responded with the same action, return early
-  if (interviewRecord.candidateResponse === payload.action) {
+  if (interviewRecord.candidateResponse === action) {
     return {
       success: true,
       interviewId: interviewRecord.id,
@@ -49,19 +52,65 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  // Update the candidate's response
-  const [updated] = await db.update(interview)
-    .set({
-      candidateResponse: payload.action,
-      candidateRespondedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(interview.id, payload.id))
-    .returning({
-      id: interview.id,
-      candidateResponse: interview.candidateResponse,
-      candidateRespondedAt: interview.candidateRespondedAt,
-    })
+  const app = await db.query.application.findFirst({
+    where: eq(application.id, interviewRecord.applicationId),
+    with: { candidate: { columns: { email: true } } },
+  })
+  const conversation = await db.query.candidateConversation.findFirst({
+    where: and(
+      eq(candidateConversation.applicationId, interviewRecord.applicationId),
+      eq(candidateConversation.organizationId, interviewRecord.organizationId),
+    ),
+  })
+  const latestMessage = conversation
+    ? await db.query.candidateMessage.findFirst({
+        where: eq(candidateMessage.conversationId, conversation.id),
+        orderBy: [desc(candidateMessage.createdAt)],
+      })
+    : null
+
+  const respondedAt = new Date()
+  const responseLabel = action === 'accepted'
+    ? 'Confirmed the interview'
+    : action === 'tentative'
+      ? 'Requested another time'
+      : 'Declined the interview'
+
+  const updated = await db.transaction(async (tx) => {
+    const [result] = await tx.update(interview)
+      .set({ candidateResponse: action, candidateRespondedAt: respondedAt, updatedAt: respondedAt })
+      .where(eq(interview.id, payload.id))
+      .returning({
+        id: interview.id,
+        candidateResponse: interview.candidateResponse,
+        candidateRespondedAt: interview.candidateRespondedAt,
+      })
+
+    if (conversation && app?.candidate) {
+      await tx.insert(candidateMessage).values({
+        organizationId: interviewRecord.organizationId,
+        conversationId: conversation.id,
+        direction: 'inbound',
+        status: 'delivered',
+        fromEmail: normalizeEmailAddress(app.candidate.email),
+        toEmail: normalizeEmailAddress(env.RESEND_CANDIDATE_FROM_EMAIL),
+        subject: latestMessage ? replySubject(latestMessage.subject) : `Interview response: ${interviewRecord.title}`,
+        bodyText: responseLabel,
+        kind: 'interview_response',
+        interviewId: interviewRecord.id,
+        calendarAttachmentStatus: 'not_applicable',
+        deliveredAt: respondedAt,
+        createdAt: respondedAt,
+        updatedAt: respondedAt,
+      })
+      await tx.update(candidateConversation).set({
+        unreadCount: sql`${candidateConversation.unreadCount} + 1`,
+        lastMessageAt: respondedAt,
+        updatedAt: respondedAt,
+      }).where(eq(candidateConversation.id, conversation.id))
+    }
+    return result
+  })
 
   return {
     success: true,

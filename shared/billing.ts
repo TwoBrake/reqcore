@@ -73,6 +73,13 @@ export const ACTIVE_ROLE_LIMITS: Record<BillingTier, number> = {
 export const FREE_PLAN_ANALYSIS_LIMIT = 50
 
 /**
+ * Lifetime allowance of outbound candidate emails for a Free organization.
+ * Incoming replies never consume this allowance and remain readable after the
+ * limit is reached. Paid plans have unlimited candidate messaging.
+ */
+export const FREE_PLAN_CANDIDATE_MESSAGE_LIMIT = 5
+
+/**
  * Paid, self-serve plans. Mirrors the marketing pricing page (pricing-v5). Free
  * needs no checkout; Agency is contact-sales, so neither appears here.
  */
@@ -91,6 +98,7 @@ export const BILLING_PLANS: BillingPlan[] = [
       'Bring your own AI key (BYOK)',
       'Full shortlist workflow',
       'Branded career page for your open roles',
+      'Two-way candidate messaging inbox',
       'Invite your whole team. No per-seat fees.',
       'Share and export shortlists',
       'Email support',
@@ -161,7 +169,8 @@ export function activeRoleLimitForTier(tier: string): number {
  *    access export (Art. 15/20) and must stay available on every plan.
  */
 export type PlanFeature =
-  | 'interviews' // Interview scheduling — Solo and above
+  | 'interviews' // Interview scheduling — Free is limited through candidate conversation usage
+  | 'candidateMessaging' // Readable inbox on every plan; Free outbound is count-limited
   | 'careerPage' // Branded per-org career page — available on every plan
   | 'calendar' // Calendar (Google) sync on interviews — Team and above
   | 'sourceAnalytics' // Source attribution dashboard — Team and above
@@ -195,7 +204,8 @@ const TIER_DISPLAY_NAME: Record<BillingTier, string> = {
  * acquisition surface; Team monetizes *removing* that branding, not having it.
  */
 export const FEATURE_MIN_TIER: Record<PlanFeature, BillingTier> = {
-  interviews: 'solo',
+  interviews: 'free',
+  candidateMessaging: 'free',
   careerPage: 'free',
   calendar: 'team',
   sourceAnalytics: 'team',
@@ -210,6 +220,7 @@ export const FEATURE_MIN_TIER: Record<PlanFeature, BillingTier> = {
 /** Short, user-facing label for each feature, used in upgrade prompts. */
 export const FEATURE_LABEL: Record<PlanFeature, string> = {
   interviews: 'Interview scheduling',
+  candidateMessaging: 'Candidate messaging',
   careerPage: 'Career page',
   calendar: 'Calendar integration',
   sourceAnalytics: 'Source analytics',

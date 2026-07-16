@@ -31,6 +31,24 @@ export interface ICalEvent {
   sequence?: number
 }
 
+export interface ICalendarAttachment {
+  filename: string
+  content: string
+  contentType: string
+}
+
+/** Build the Resend attachment payload without losing the iTIP method metadata. */
+export function buildICalendarAttachment(
+  content: string,
+  method: 'REQUEST' | 'CANCEL',
+): ICalendarAttachment {
+  return {
+    filename: 'interview.ics',
+    content: Buffer.from(content, 'utf8').toString('base64'),
+    contentType: `text/calendar; charset=utf-8; method=${method}`,
+  }
+}
+
 /**
  * Fold long lines per RFC 5545 §3.1: lines MUST NOT exceed 75 octets.
  * Continuation lines begin with a single space (LWSP).
@@ -88,7 +106,8 @@ function nowStamp(): string {
 /**
  * Generate a METHOD:REQUEST iCalendar (.ics) string for an interview invitation.
  * This format is recognized by all major email clients (Gmail, Outlook, Apple Mail)
- * and shows native Accept/Decline/Tentative buttons.
+ * and keeps the event synchronized across invitation updates. Candidate responses
+ * are collected through Reqcore rather than calendar-client RSVP messages.
  */
 export function generateInterviewICS(event: ICalEvent): string {
   const endTime = new Date(event.startTime.getTime() + event.durationMinutes * 60_000)
@@ -110,7 +129,7 @@ export function generateInterviewICS(event: ICalEvent): string {
     `DESCRIPTION:${escapeICalText(event.description)}`,
     ...(event.location ? [`LOCATION:${escapeICalText(event.location)}`] : []),
     `ORGANIZER;CN=${escapeICalText(event.organizerName)}:mailto:${event.organizerEmail}`,
-    `ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;CN=${escapeICalText(event.attendeeName)}:mailto:${event.attendeeEmail}`,
+    `ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=FALSE;CN=${escapeICalText(event.attendeeName)}:mailto:${event.attendeeEmail}`,
     `SEQUENCE:${sequence}`,
     'STATUS:CONFIRMED',
     'TRANSP:OPAQUE',

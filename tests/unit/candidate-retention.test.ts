@@ -7,6 +7,7 @@ vi.mock('../../server/utils/erasure', () => ({ recordRetentionAudit }))
 
 import {
   findActiveCandidate,
+  restoreCandidateForEngagement,
   restoreCandidateForPublicApplication,
 } from '../../server/utils/candidate-retention'
 
@@ -14,7 +15,28 @@ afterEach(() => vi.unstubAllGlobals())
 
 describe('candidate retention lifecycle guards', () => {
   beforeEach(() => {
+    recordRetentionAudit.mockClear()
     vi.stubGlobal('logInfo', vi.fn())
+  })
+
+  it('restores a candidate when a verified inbound message is received', async () => {
+    const returning = vi.fn(async () => [{ id: 'candidate-1' }])
+    const where = vi.fn(() => ({ returning }))
+    const set = vi.fn(() => ({ where }))
+    vi.stubGlobal('db', { update: vi.fn(() => ({ set })) })
+
+    await expect(
+      restoreCandidateForEngagement('org-1', 'candidate-1', 'candidate_message'),
+    ).resolves.toBe(true)
+
+    expect(recordRetentionAudit).toHaveBeenCalledWith(
+      'org-1',
+      'candidate-1',
+      'restored',
+      'success',
+      null,
+      { source: 'candidate_message' },
+    )
   })
 
   it('finds only an active candidate through the scoped query', async () => {

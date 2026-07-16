@@ -1,7 +1,11 @@
 <script setup lang="ts">
+import { CalendarClock, Check, CircleCheck, CircleX, Loader2, X } from 'lucide-vue-next'
+
 definePageMeta({
   layout: 'public',
 })
+
+type CandidateAction = 'accepted' | 'declined' | 'tentative'
 
 const route = useRoute()
 const token = computed(() => {
@@ -14,22 +18,16 @@ const { data, error: fetchError, status: fetchStatus } = await useFetch('/api/pu
   immediate: !!token.value,
 })
 
-const actionLabels: Record<string, string> = {
-  accepted: 'Accept',
+const actionLabels: Record<CandidateAction, string> = {
+  accepted: 'Confirm',
   declined: 'Decline',
-  tentative: 'Mark as Tentative',
-}
-
-const actionColors: Record<string, string> = {
-  accepted: 'bg-green-600 hover:bg-green-700',
-  declined: 'bg-red-600 hover:bg-red-700',
-  tentative: 'bg-yellow-600 hover:bg-yellow-700',
+  tentative: 'Request Another Time',
 }
 
 const responseLabels: Record<string, string> = {
   accepted: 'Accepted',
   declined: 'Declined',
-  tentative: 'Tentative',
+  tentative: 'Another Time Requested',
   pending: 'Pending',
 }
 
@@ -45,16 +43,18 @@ const interviewTypeLabels: Record<string, string> = {
 const confirming = ref(false)
 const confirmed = ref(false)
 const confirmError = ref('')
+const submittedAction = ref<CandidateAction | null>(null)
 
-async function confirmResponse() {
+async function confirmResponse(action: CandidateAction) {
   if (!token.value) return
   confirming.value = true
+  submittedAction.value = action
   confirmError.value = ''
 
   try {
     await $fetch('/api/public/interviews/respond', {
       method: 'POST',
-      body: { token: token.value },
+      body: { token: token.value, action },
     })
     confirmed.value = true
   }
@@ -63,6 +63,7 @@ async function confirmResponse() {
       ? (err as { data?: { statusMessage?: string } }).data?.statusMessage
       : undefined
     confirmError.value = message || 'Something went wrong. Please try again.'
+    submittedAction.value = null
   }
   finally {
     confirming.value = false
@@ -133,23 +134,23 @@ useHead({
     <!-- Confirmed successfully -->
     <div v-else-if="confirmed" class="text-center">
       <div class="inline-flex items-center justify-center w-16 h-16 rounded-full mb-4"
-           :class="data?.action === 'accepted' ? 'bg-green-100 dark:bg-green-900/30' : data?.action === 'declined' ? 'bg-red-100 dark:bg-red-900/30' : 'bg-yellow-100 dark:bg-yellow-900/30'">
-        <span class="text-2xl">
-          {{ data?.action === 'accepted' ? '✓' : data?.action === 'declined' ? '✗' : '?' }}
-        </span>
+           :class="submittedAction === 'accepted' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : submittedAction === 'declined' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'">
+        <CircleCheck v-if="submittedAction === 'accepted'" class="size-7" />
+        <CircleX v-else-if="submittedAction === 'declined'" class="size-7" />
+        <CalendarClock v-else class="size-7" />
       </div>
       <h1 class="text-xl font-semibold text-surface-900 dark:text-surface-100 mb-2">
         Response Recorded
       </h1>
       <p class="text-surface-500 mb-6">
-        <template v-if="data?.action === 'accepted'">
+        <template v-if="submittedAction === 'accepted'">
           You've accepted the interview. It should appear in your calendar if you accepted the calendar invite from the email.
         </template>
-        <template v-else-if="data?.action === 'declined'">
+        <template v-else-if="submittedAction === 'declined'">
           You've declined the interview. The hiring team has been notified.
         </template>
         <template v-else>
-          You've marked this as tentative. The hiring team has been notified.
+          You've requested another time. The hiring team has been notified.
         </template>
       </p>
     </div>
@@ -255,28 +256,53 @@ useHead({
           </dl>
         </div>
 
-        <!-- Confirm action -->
-        <div class="text-center">
-          <p class="text-sm text-surface-500 mb-4">
-            You are about to <strong>{{ actionLabels[data.action]?.toLowerCase() }}</strong> this interview.
+        <!-- Response actions -->
+        <div>
+          <p class="text-sm font-medium text-surface-900 dark:text-surface-100 mb-3 text-center">
+            Can you attend this interview?
           </p>
 
           <div v-if="confirmError" class="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-600 dark:text-red-400">
             {{ confirmError }}
           </div>
 
-          <button
-            :disabled="confirming"
-            :class="actionColors[data.action]"
-            class="w-full text-white font-semibold py-3 px-6 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            @click="confirmResponse"
-          >
-            <span v-if="confirming">Processing...</span>
-            <span v-else>{{ actionLabels[data.action] }} Interview</span>
-          </button>
+          <div class="grid gap-2">
+            <button
+              type="button"
+              :disabled="confirming"
+              class="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              @click="confirmResponse('accepted')"
+            >
+              <Loader2 v-if="confirming && submittedAction === 'accepted'" class="size-4 animate-spin" />
+              <Check v-else class="size-4" />
+              {{ actionLabels.accepted }}
+            </button>
 
-          <p class="text-xs text-surface-400 mt-4">
-            Clicking this button will record your response and notify the hiring team.
+            <button
+              type="button"
+              :disabled="confirming"
+              class="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-surface-300 bg-white px-4 py-3 text-sm font-semibold text-surface-800 transition-colors hover:bg-surface-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-surface-700 dark:bg-surface-900 dark:text-surface-100 dark:hover:bg-surface-800"
+              @click="confirmResponse('tentative')"
+            >
+              <Loader2 v-if="confirming && submittedAction === 'tentative'" class="size-4 animate-spin" />
+              <CalendarClock v-else class="size-4" />
+              {{ actionLabels.tentative }}
+            </button>
+
+            <button
+              type="button"
+              :disabled="confirming"
+              class="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md px-4 py-3 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-950/30"
+              @click="confirmResponse('declined')"
+            >
+              <Loader2 v-if="confirming && submittedAction === 'declined'" class="size-4 animate-spin" />
+              <X v-else class="size-4" />
+              {{ actionLabels.declined }}
+            </button>
+          </div>
+
+          <p class="text-xs text-surface-400 mt-4 text-center">
+            Your response will be recorded and shared with the hiring team.
           </p>
         </div>
       </div>

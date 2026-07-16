@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm'
-import { interview, application, candidate, job } from '../../../database/schema'
+import { interview, application, candidate, candidateMessage, job } from '../../../database/schema'
 import { interviewIdParamSchema } from '../../../utils/schemas/interview'
 
 export default defineEventHandler(async (event) => {
@@ -18,12 +18,14 @@ export default defineEventHandler(async (event) => {
       duration: interview.duration,
       location: interview.location,
       notes: interview.notes,
+      personalNote: interview.personalNote,
       interviewers: interview.interviewers,
       invitationSentAt: interview.invitationSentAt,
       candidateResponse: interview.candidateResponse,
       candidateRespondedAt: interview.candidateRespondedAt,
       googleCalendarEventId: interview.googleCalendarEventId,
       googleCalendarEventLink: interview.googleCalendarEventLink,
+      timezone: interview.timezone,
       createdById: interview.createdById,
       createdAt: interview.createdAt,
       updatedAt: interview.updatedAt,
@@ -46,5 +48,22 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'Interview not found' })
   }
 
-  return data
+  const latestDelivery = await db.query.candidateMessage.findFirst({
+    where: and(eq(candidateMessage.interviewId, id), eq(candidateMessage.organizationId, orgId)),
+    orderBy: (message, { desc }) => [desc(message.createdAt)],
+    columns: {
+      id: true,
+      kind: true,
+      status: true,
+      calendarAttachmentStatus: true,
+      calendarAttachmentError: true,
+      errorCode: true,
+      errorMessage: true,
+      sentAt: true,
+      deliveredAt: true,
+      failedAt: true,
+    },
+  })
+
+  return { ...data, latestDelivery: latestDelivery ?? null }
 })

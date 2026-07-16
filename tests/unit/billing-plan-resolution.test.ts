@@ -142,8 +142,8 @@ describe('assertActiveRoleLimit', () => {
 })
 
 describe('tierHasFeature', () => {
-  it('gates interviews at Solo+ and calendar at Team+', () => {
-    expect(tierHasFeature('free', 'interviews')).toBe(false)
+  it('allows tracked interviews on Free and gates calendar at Team+', () => {
+    expect(tierHasFeature('free', 'interviews')).toBe(true)
     expect(tierHasFeature('solo', 'interviews')).toBe(true)
     expect(tierHasFeature('solo', 'calendar')).toBe(false)
     expect(tierHasFeature('team', 'calendar')).toBe(true)
@@ -247,7 +247,7 @@ describe('assertPlanFeature', () => {
 
   it('rejects a free org (no subscription) for a paid feature', async () => {
     stubDb([])
-    await expect(assertPlanFeature('org_1', 'interviews')).rejects.toMatchObject({ statusCode: 402 })
+    await expect(assertPlanFeature('org_1', 'interviews')).resolves.toBe('free')
   })
 
   it('fails open (returns scale) when Stripe is unconfigured in dev/CI', async () => {

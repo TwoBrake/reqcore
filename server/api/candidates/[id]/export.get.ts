@@ -31,6 +31,16 @@ export default defineEventHandler(async (event) => {
           // automated-decision logic) and must be included in the export.
           analysisRuns: true,
           source: true,
+          conversation: {
+            columns: {
+              id: true,
+              applicationId: true,
+              lastMessageAt: true,
+              createdAt: true,
+              updatedAt: true,
+            },
+            with: { messages: true },
+          },
         },
       },
     },

@@ -3,6 +3,7 @@ import { createRateLimiter } from '../utils/rateLimit'
 const SAFE_METHODS = new Set(['GET', 'HEAD'])
 const SKIP_METHODS = new Set(['OPTIONS'])
 const STRIPE_WEBHOOK_PATH = '/api/auth/stripe/webhook'
+const RESEND_WEBHOOK_PATH = '/api/webhooks/resend'
 
 // Baseline global API limits (per IP)
 const globalReadLimiter = createRateLimiter({
@@ -37,7 +38,9 @@ export default defineEventHandler(async (event) => {
 
   const path = getRequestURL(event).pathname
   if (!path.startsWith('/api/')) return
-  if (path === STRIPE_WEBHOOK_PATH) return
+  // Provider webhooks have verified signatures and retry from shared provider
+  // IPs, so putting them in the user-facing IP bucket can drop valid events.
+  if (path === STRIPE_WEBHOOK_PATH || path === RESEND_WEBHOOK_PATH) return
 
   const method = event.method.toUpperCase()
   if (SKIP_METHODS.has(method)) return
