@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveDatabaseUrl } from "./database-url";
 
 /**
  * Preprocessor that normalizes empty strings to undefined.
@@ -343,7 +344,14 @@ export const env = new Proxy({} as z.infer<typeof envSchema>, {
 
     // Parse once on first access, then cache for all subsequent reads
     if (!(globalThis as Record<string, unknown>).__env) {
-      const result = envSchema.safeParse(process.env);
+      // Railway preview environments can inherit a DATABASE_URL whose service
+      // reference has an empty hostname. Migration and seed commands already
+      // recover from this using the individual PG/proxy variables; normalize
+      // the runtime value the same way before validating the complete config.
+      const result = envSchema.safeParse({
+        ...process.env,
+        DATABASE_URL: resolveDatabaseUrl(process.env),
+      });
       if (!result.success) {
         const missing = result.error.issues
           .map((i) => `  - ${i.path.join(".")}: ${i.message}`)

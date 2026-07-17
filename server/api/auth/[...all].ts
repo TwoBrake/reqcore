@@ -158,7 +158,10 @@ export default defineEventHandler(async (event) => {
 
     // Detect BETTER_AUTH_URL mismatch — the #1 self-hosting setup issue
     const requestOrigin = requestUrl.origin
-    const configuredUrl = env.BETTER_AUTH_URL?.trim() || env.RAILWAY_PUBLIC_DOMAIN?.trim()
+    // Read raw values here: the original failure may be environment validation,
+    // so touching the validated env proxy again would replace the useful error.
+    const configuredUrl = process.env.BETTER_AUTH_URL?.trim()
+      || process.env.RAILWAY_PUBLIC_DOMAIN?.trim()
     const configuredOrigin = configuredUrl
       ? (() => { try { return new URL(configuredUrl.startsWith('http') ? configuredUrl : `https://${configuredUrl}`).origin } catch { return configuredUrl } })()
       : undefined
@@ -169,29 +172,25 @@ export default defineEventHandler(async (event) => {
         configured_origin: configuredOrigin,
         request_origin: requestOrigin,
       })
-      throw createError({
-        statusCode: 500,
-        statusMessage: 'Auth configuration error',
-        data: {
-          code: 'AUTH_URL_MISMATCH',
-          message: `BETTER_AUTH_URL is set to "${configuredOrigin}" but this request came from "${requestOrigin}". `
-            + 'Update the BETTER_AUTH_URL environment variable to match your deployment domain, then redeploy.',
-        },
-      })
+      setResponseStatus(event, 500, 'Auth configuration error')
+      return {
+        error: true,
+        code: 'AUTH_URL_MISMATCH',
+        message: `BETTER_AUTH_URL is set to "${configuredOrigin}" but this request came from "${requestOrigin}". `
+          + 'Update the BETTER_AUTH_URL environment variable to match your deployment domain, then redeploy.',
+      }
     }
 
-    const exposeDetails = isRailwayPreviewEnvironment(env.RAILWAY_ENVIRONMENT_NAME) || import.meta.dev
+    const exposeDetails = isRailwayPreviewEnvironment(process.env.RAILWAY_ENVIRONMENT_NAME) || import.meta.dev
     const details = error instanceof Error ? error.message : 'Unknown error'
 
-    throw createError({
-      statusCode: 500,
-      statusMessage: 'Server Error',
-      data: {
-        code: 'AUTH_HANDLER_ERROR',
-        message: exposeDetails
-          ? details
-          : 'Authentication failed. If you are self-hosting, verify that the BETTER_AUTH_URL environment variable matches your deployment domain (e.g. "https://your-app.up.railway.app") and redeploy.',
-      },
-    })
+    setResponseStatus(event, 500, 'Server Error')
+    return {
+      error: true,
+      code: 'AUTH_HANDLER_ERROR',
+      message: exposeDetails
+        ? details
+        : 'Authentication failed. If you are self-hosting, verify that the BETTER_AUTH_URL environment variable matches your deployment domain (e.g. "https://your-app.up.railway.app") and redeploy.',
+    }
   }
 })
