@@ -8,7 +8,7 @@
  * so the upsell and the org's current limits are reachable from every page,
  * not just buried in settings.
  */
-import { Briefcase, ArrowRight, Sparkles, Zap } from 'lucide-vue-next'
+import { Briefcase, ArrowRight, MessageSquare, Sparkles, Zap } from 'lucide-vue-next'
 import { getBillingPlan } from '~~/shared/billing'
 import { freePlanUsage, useBillingStatus } from '~/composables/useBillingStatus'
 
@@ -23,7 +23,7 @@ const atLimit = computed(() => {
   if (!u) return false
   const hit = (m: { used: number, limit: number | null }) =>
     m.limit != null && Number.isFinite(m.limit) && m.used >= m.limit
-  return hit(u.activeRoles) || hit(u.aiAnalysis)
+  return hit(u.activeRoles) || hit(u.aiAnalysis) || hit(u.candidateConversations)
 })
 
 const recommended = getBillingPlan('solo')!
@@ -75,6 +75,7 @@ watch(() => route.path, () => { open.value = false })
         <div class="space-y-4 px-4 py-4">
           <UsageMeterBar label="Active roles" :icon="Briefcase" :used="usage.activeRoles.used" :limit="usage.activeRoles.limit" />
           <UsageMeterBar label="AI shortlist runs" :icon="Zap" :used="usage.aiAnalysis.used" :limit="usage.aiAnalysis.limit" />
+          <UsageMeterBar label="Candidate conversations" :icon="MessageSquare" :used="usage.candidateConversations.used" :limit="usage.candidateConversations.limit" />
         </div>
 
         <!-- CTA -->
@@ -88,7 +89,7 @@ watch(() => route.path, () => { open.value = false })
             <ArrowRight class="size-4 transition-transform group-hover:translate-x-0.5" />
           </NuxtLink>
           <p class="mt-2 text-center text-xs text-surface-400 dark:text-surface-500">
-            More roles · unlimited AI shortlists
+            More roles · unlimited AI shortlists · unlimited conversations
           </p>
         </div>
       </div>

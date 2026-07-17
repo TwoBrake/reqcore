@@ -346,7 +346,7 @@ onUnmounted(() => clearInterval(pollTimer))
           <button
             class="grid size-9 place-items-center rounded-lg bg-brand-600 text-white hover:bg-brand-700"
             :class="!allowance.canSend ? 'cursor-not-allowed opacity-50' : ''"
-            :title="allowance.canSend ? 'New message' : 'Free email limit reached'"
+            :title="allowance.canSend ? 'New message' : 'Free conversation limit reached'"
             :disabled="!allowance.canSend"
             @click="openCompose()"
           >
@@ -355,8 +355,20 @@ onUnmounted(() => clearInterval(pollTimer))
         </div>
       </header>
 
-      <div v-if="!allowance.canSend" class="border-b border-surface-200 p-3 dark:border-surface-800">
-        <CandidateMessageUpgradePrompt compact />
+      <div v-if="allowance.limit != null" class="border-b border-surface-200 dark:border-surface-800">
+        <CandidateMessageUpgradePrompt v-if="!allowance.canSend" compact class="m-3" />
+        <div v-else class="flex items-center justify-between gap-2 px-4 py-2.5">
+          <p class="text-xs text-surface-500 dark:text-surface-400">
+            <span class="font-semibold text-surface-700 dark:text-surface-200">{{ allowance.used }} of {{ allowance.limit }}</span>
+            free conversations started
+          </p>
+          <NuxtLink
+            :to="$localePath('/dashboard/settings/billing')"
+            class="shrink-0 text-xs font-medium text-brand-600 no-underline hover:underline dark:text-brand-400"
+          >
+            Upgrade
+          </NuxtLink>
+        </div>
       </div>
 
       <div class="space-y-2.5 border-b border-surface-200 p-3 dark:border-surface-800">
@@ -504,7 +516,7 @@ onUnmounted(() => clearInterval(pollTimer))
                     <component :is="statusMeta[message.status].icon" class="size-3.5" :class="statusMeta[message.status].class" />
                     <span :class="statusMeta[message.status].class">{{ statusMeta[message.status].label }}</span>
                     <button
-                      v-if="(allowance.canSend || (message.interviewId && message.errorCode !== 'candidate_message_limit')) && ['failed', 'bounced'].includes(message.status)"
+                      v-if="['failed', 'bounced'].includes(message.status)"
                       class="font-medium text-brand-600 hover:underline dark:text-brand-400"
                       :disabled="isSending"
                       @click="retryMessage(message)"
@@ -517,7 +529,7 @@ onUnmounted(() => clearInterval(pollTimer))
           </div>
         </div>
 
-        <form v-if="allowance.canSend" class="shrink-0 border-t border-surface-200 bg-white p-3 dark:border-surface-800 dark:bg-surface-950 sm:p-4" @submit.prevent="submitReply">
+        <form class="shrink-0 border-t border-surface-200 bg-white p-3 dark:border-surface-800 dark:bg-surface-950 sm:p-4" @submit.prevent="submitReply">
           <div class="mx-auto max-w-3xl">
             <div class="flex items-end gap-2">
               <textarea
@@ -540,17 +552,12 @@ onUnmounted(() => clearInterval(pollTimer))
               </button>
             </div>
             <p class="mt-1.5 px-1 text-[11px] text-surface-400">
-              <template v-if="allowance.remaining != null">{{ allowance.remaining }} of {{ allowance.limit }} free candidate emails remaining. </template>
+              <template v-if="allowance.remaining != null">{{ allowance.remaining }} of {{ allowance.limit }} free conversations remaining. Replies are unlimited. </template>
               Press <kbd class="rounded border border-surface-300 bg-surface-50 px-1 font-sans text-[10px] text-surface-500 dark:border-surface-700 dark:bg-surface-800 dark:text-surface-400">⌘</kbd>
               <kbd class="rounded border border-surface-300 bg-surface-50 px-1 font-sans text-[10px] text-surface-500 dark:border-surface-700 dark:bg-surface-800 dark:text-surface-400">Enter</kbd> to send
             </p>
           </div>
         </form>
-        <div v-else class="shrink-0 border-t border-surface-200 bg-white p-3 dark:border-surface-800 dark:bg-surface-950 sm:p-4">
-          <div class="mx-auto max-w-3xl">
-            <CandidateMessageUpgradePrompt />
-          </div>
-        </div>
       </template>
       <div v-else class="grid flex-1 place-items-center bg-surface-50 px-6 text-center dark:bg-surface-950">
         <div>
@@ -592,7 +599,10 @@ onUnmounted(() => clearInterval(pollTimer))
             <textarea v-model="compose.body" required rows="8" maxlength="20000" class="w-full resize-y rounded-lg border border-surface-300 bg-white px-3 py-2 text-sm text-surface-900 outline-none focus:border-brand-500 dark:border-surface-700 dark:bg-surface-950 dark:text-surface-100" @input="composeRequestId = null" />
           </label>
         </div>
-        <footer class="flex justify-end gap-2 border-t border-surface-200 px-4 py-3 dark:border-surface-800">
+        <footer class="flex items-center justify-end gap-2 border-t border-surface-200 px-4 py-3 dark:border-surface-800">
+          <p v-if="allowance.limit != null" class="mr-auto text-xs text-surface-500 dark:text-surface-400">
+            Uses 1 of <span class="font-semibold text-surface-700 dark:text-surface-200">{{ allowance.remaining }}</span> free conversations left. Replies stay unlimited.
+          </p>
           <button type="button" class="rounded-lg border border-surface-300 px-3 py-2 text-sm font-medium text-surface-700 hover:bg-surface-50 dark:border-surface-700 dark:text-surface-300 dark:hover:bg-surface-800" @click="showCompose = false">Cancel</button>
           <button type="submit" class="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50" :disabled="isSending || !compose.applicationId || !compose.subject.trim() || !compose.body.trim()">
             <RefreshCw v-if="isSending" class="size-4 animate-spin" />

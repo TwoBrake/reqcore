@@ -1,11 +1,15 @@
-import { and, count, desc, eq, ne, sql } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import {
   application,
   candidateConversation,
   candidateMessage,
 } from '~~/server/database/schema'
 import { sendCandidateMessageEmail } from '~~/server/utils/email'
-import { FREE_PLAN_CANDIDATE_MESSAGE_LIMIT } from '~~/shared/billing'
+import { FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT } from '~~/shared/billing'
+import {
+  canSendIntoConversation,
+  countStartedConversations,
+} from '../../utils/candidate-message-allowance'
 import {
   appendReference,
   candidateReplyAddress,
@@ -80,7 +84,7 @@ export default defineEventHandler(async (event) => {
 
   const alreadySent = await db.transaction(async (tx) => {
     // Serialize Free allowance reservations per organization so overlapping
-    // sends cannot both claim the fifth and final slot.
+    // sends cannot both claim the fifth and final conversation slot.
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtext(${`candidate-message:${orgId}`}))`,
     )
@@ -95,29 +99,20 @@ export default defineEventHandler(async (event) => {
     }
     if (current?.providerMessageId) return current
 
-    const alreadyHoldsSlot = current?.direction === 'outbound' && current.status !== 'failed'
-    if (tier === 'free' && !alreadyHoldsSlot) {
-      const [{ value: used } = { value: 0 }] = await tx
-        .select({ value: count() })
-        .from(candidateMessage)
-        .where(and(
-          eq(candidateMessage.organizationId, orgId),
-          eq(candidateMessage.direction, 'outbound'),
-          ne(candidateMessage.status, 'failed'),
-        ))
-
-      if (used >= FREE_PLAN_CANDIDATE_MESSAGE_LIMIT) {
-        throw createError({
-          statusCode: 402,
-          statusMessage: `You've used all ${FREE_PLAN_CANDIDATE_MESSAGE_LIMIT} free candidate emails. Upgrade to Solo to keep the conversation moving.`,
-          data: {
-            code: 'CANDIDATE_MESSAGE_LIMIT',
-            tier,
-            used,
-            limit: FREE_PLAN_CANDIDATE_MESSAGE_LIMIT,
-          },
-        })
-      }
+    // Replies into a started conversation are unlimited; only opening a new
+    // conversation consumes one of the Free slots.
+    if (!(await canSendIntoConversation(orgId, conversation.id, tier, tx))) {
+      const used = await countStartedConversations(orgId, tx)
+      throw createError({
+        statusCode: 402,
+        statusMessage: `You've started all ${FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT} free candidate conversations. Upgrade to Solo to open more.`,
+        data: {
+          code: 'CANDIDATE_MESSAGE_LIMIT',
+          tier,
+          used,
+          limit: FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT,
+        },
+      })
     }
 
     if (!current) {

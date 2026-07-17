@@ -16,6 +16,7 @@ export interface BillingUsage {
   tier: string
   activeRoles: UsageMeter
   aiAnalysis: UsageMeter
+  candidateConversations: UsageMeter
 }
 
 export interface BillingStatus {

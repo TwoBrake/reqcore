@@ -144,7 +144,7 @@ const plans = computed<PlanCard[]>(() => [
       'Bring your own AI key for unlimited shortlists after that',
       'Branded application forms',
       'Resume parsing and candidate profiles',
-      '5 candidate emails to try messaging',
+      '5 candidate conversations, unlimited replies',
       'Source tracking',
       'Multi-language support',
     ],

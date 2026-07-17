@@ -240,7 +240,7 @@ onUnmounted(() => clearInterval(pollTimer))
               <component :is="statusMeta[message.status].icon" class="size-3.5" :class="statusMeta[message.status].class" />
               <span :class="statusMeta[message.status].class">{{ statusMeta[message.status].label }}</span>
               <button
-                v-if="(allowance.canSend || (message.interviewId && message.errorCode !== 'candidate_message_limit')) && ['failed', 'bounced'].includes(message.status)"
+                v-if="['failed', 'bounced'].includes(message.status)"
                 type="button"
                 class="font-medium text-brand-600 hover:underline disabled:opacity-50 dark:text-brand-400"
                 :disabled="isSending"
@@ -257,7 +257,7 @@ onUnmounted(() => clearInterval(pollTimer))
     </div>
 
     <form
-      v-if="allowance.canSend"
+      v-if="hasConversation || allowance.canSend"
       class="w-full min-w-0 shrink-0 rounded-xl border border-surface-200/80 bg-white p-4 shadow-lg shadow-surface-900/[0.08] dark:border-surface-800/60 dark:bg-surface-900 dark:shadow-black/30"
       @submit.prevent="submitMessage"
     >
@@ -294,7 +294,7 @@ onUnmounted(() => clearInterval(pollTimer))
         </button>
       </div>
       <p class="mt-2 break-words px-0.5 text-[11px] text-surface-400 [overflow-wrap:anywhere] dark:text-surface-500">
-        <template v-if="allowance.remaining != null">{{ allowance.remaining }} of {{ allowance.limit }} free candidate emails remaining. </template>
+        <template v-if="allowance.remaining != null && !hasConversation"><span class="font-semibold text-surface-500 dark:text-surface-400">{{ allowance.remaining }} of {{ allowance.limit }} free conversations left.</span> Starting this uses one; replies stay unlimited. </template>
         Messages are emailed to {{ candidateEmail }}. <kbd class="font-mono">⌘</kbd>+<kbd class="font-mono">Enter</kbd> to send.
       </p>
     </form>

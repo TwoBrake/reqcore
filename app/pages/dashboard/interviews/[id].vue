@@ -94,14 +94,16 @@ const allowedTransitions = computed(() => {
   return (INTERVIEW_STATUS_TRANSITIONS[interview.value.status] ?? []) as InterviewStatus[]
 })
 
+// Rescheduling (transition back to `scheduled`) is handled by the dedicated
+// Reschedule button, so the status-mark buttons only cover forward marks.
+const statusMarkTransitions = computed(
+  () => allowedTransitions.value.filter(s => s !== 'scheduled') as Exclude<InterviewStatus, 'scheduled'>[],
+)
+
 const isTransitioning = ref(false)
 const pendingTransition = ref<Exclude<InterviewStatus, 'scheduled'> | null>(null)
 
-function requestTransition(newStatus: InterviewStatus) {
-  if (newStatus === 'scheduled') {
-    openReschedule()
-    return
-  }
+function requestTransition(newStatus: Exclude<InterviewStatus, 'scheduled'>) {
   pendingTransition.value = newStatus
 }
 
@@ -200,47 +202,15 @@ async function saveNotes() {
 
 // ─── Reschedule ──────────────────────────────────────────────────
 const showReschedule = ref(false)
-const rescheduleForm = reactive({
-  date: '',
-  time: '',
-  duration: 60,
-})
-const isRescheduling = ref(false)
-const rescheduleError = ref('')
 
 function openReschedule() {
   if (!interview.value) return
-  const d = new Date(interview.value.scheduledAt)
-  rescheduleForm.date = d.toISOString().slice(0, 10)
-  rescheduleForm.time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  rescheduleForm.duration = interview.value.duration
-  rescheduleError.value = ''
   showReschedule.value = true
 }
 
-async function handleReschedule() {
-  rescheduleError.value = ''
-  if (!rescheduleForm.date || !rescheduleForm.time) {
-    rescheduleError.value = 'Date and time are required'
-    return
-  }
-
-  isRescheduling.value = true
-  try {
-    const scheduledAt = new Date(`${rescheduleForm.date}T${rescheduleForm.time}`).toISOString()
-    const result = await updateInterview({
-      scheduledAt,
-      duration: rescheduleForm.duration,
-      status: 'scheduled',
-    })
-    showReschedule.value = false
-    reportCandidateUpdate(result, interview.value!.candidateEmail, 'Interview rescheduled')
-  } catch (err: any) {
-    if (handlePreviewReadOnlyError(err)) return
-    rescheduleError.value = err.data?.statusMessage ?? 'Failed to reschedule'
-  } finally {
-    isRescheduling.value = false
-  }
+async function handleRescheduled() {
+  showReschedule.value = false
+  await refresh()
 }
 
 // ─── Edit details ────────────────────────────────────────────────
@@ -444,6 +414,13 @@ async function retryDelivery() {
         </div>
       </div>
 
+      <InterviewCandidateResponse
+        class="mb-6"
+        :response="interview.candidateResponse"
+        :responded-at="interview.candidateRespondedAt"
+        variant="panel"
+      />
+
       <!-- Quick actions -->
       <div
         v-if="allowedTransitions.length > 0"
@@ -452,7 +429,7 @@ async function retryDelivery() {
         <div class="flex flex-wrap items-center gap-2">
           <span class="inline-flex items-center rounded-full bg-surface-100 dark:bg-surface-800 px-2.5 py-1 text-xs font-medium text-surface-600 dark:text-surface-400">Quick actions</span>
           <button
-            v-for="nextStatus in allowedTransitions"
+            v-for="nextStatus in statusMarkTransitions"
             :key="nextStatus"
             :disabled="isTransitioning"
             class="inline-flex cursor-pointer items-center rounded-full px-3.5 py-1.5 text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:cursor-not-allowed disabled:opacity-50"
@@ -461,13 +438,11 @@ async function retryDelivery() {
           >
             <span
               class="mr-2 inline-flex size-1.5 rounded-full"
-              :class="nextStatus === 'completed' ? 'bg-success-200' : nextStatus === 'cancelled' ? 'bg-surface-200' : nextStatus === 'no_show' ? 'bg-danger-200' : 'bg-brand-200'"
+              :class="nextStatus === 'completed' ? 'bg-success-200' : nextStatus === 'cancelled' ? 'bg-surface-200' : 'bg-danger-200'"
             />
-            {{ nextStatus === 'scheduled'
-              ? 'Reschedule'
-              : nextStatus === 'cancelled' && interview.invitationSentAt
-                ? 'Cancel & notify'
-                : `Mark ${statusConfig[nextStatus]?.label}` }}
+            {{ nextStatus === 'cancelled' && interview.invitationSentAt
+              ? 'Cancel & notify'
+              : `Mark ${statusConfig[nextStatus]?.label}` }}
           </button>
           <button
             class="inline-flex cursor-pointer items-center rounded-full border border-brand-200 dark:border-brand-800 bg-brand-50 dark:bg-brand-950/30 px-3.5 py-1.5 text-sm font-medium text-brand-700 dark:text-brand-300 hover:bg-brand-100 dark:hover:bg-brand-950/50 transition-all duration-150"
@@ -692,75 +667,16 @@ async function retryDelivery() {
       </div>
     </template>
 
-    <!-- Reschedule Modal -->
-    <Teleport to="body">
-      <div v-if="showReschedule && interview" class="fixed inset-0 z-50 flex items-center justify-center">
-        <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="showReschedule = false" />
-        <div class="relative bg-white dark:bg-surface-900 rounded-2xl shadow-2xl shadow-surface-900/10 dark:shadow-black/30 ring-1 ring-surface-200/80 dark:ring-surface-700/60 p-6 max-w-md w-full mx-4">
-          <h3 class="text-lg font-semibold text-surface-900 dark:text-surface-100 mb-4">Reschedule Interview</h3>
-
-          <div v-if="rescheduleError" class="mb-4 rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700 dark:border-danger-800 dark:bg-danger-950/40 dark:text-danger-300">
-            {{ rescheduleError }}
-          </div>
-
-          <form class="space-y-4" @submit.prevent="handleReschedule">
-            <div>
-              <label for="reschedule-date" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
-                Date <span class="text-danger-500">*</span>
-              </label>
-              <input
-                id="reschedule-date"
-                v-model="rescheduleForm.date"
-                type="date"
-                class="w-full rounded-lg border border-surface-300 dark:border-surface-700 px-3 py-2 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-colors"
-              />
-            </div>
-            <div>
-              <label for="reschedule-time" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
-                Time <span class="text-danger-500">*</span>
-              </label>
-              <input
-                id="reschedule-time"
-                v-model="rescheduleForm.time"
-                type="time"
-                class="w-full rounded-lg border border-surface-300 dark:border-surface-700 px-3 py-2 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-colors"
-              />
-            </div>
-            <div>
-              <label for="reschedule-duration" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Duration (minutes)</label>
-              <input
-                id="reschedule-duration"
-                v-model.number="rescheduleForm.duration"
-                type="number"
-                min="5"
-                max="480"
-                class="w-full rounded-lg border border-surface-300 dark:border-surface-700 px-3 py-2 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-colors"
-              />
-            </div>
-
-            <div class="flex items-center justify-end gap-3 pt-2">
-              <p v-if="interview.invitationSentAt && interview.status === 'scheduled'" class="mr-auto max-w-xs text-xs leading-5 text-surface-500 dark:text-surface-400">
-                Candidate-facing changes send an update to {{ interview.candidateEmail }}.
-              </p>
-              <button
-                type="button"
-                class="cursor-pointer rounded-lg border border-surface-300 dark:border-surface-700 px-4 py-2 text-sm font-medium text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 transition-colors"
-                @click="showReschedule = false"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                :disabled="isRescheduling"
-                class="cursor-pointer rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {{ isRescheduling ? 'Saving…' : 'Reschedule' }}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </Teleport>
+    <!-- Reschedule Sidebar -->
+    <InterviewScheduleSidebar
+      v-if="showReschedule && interview"
+      :application-id="interview.applicationId"
+      :candidate-name="formatPersonName(interview.candidateFirstName, interview.candidateLastName)"
+      :job-title="interview.jobTitle"
+      :interview="interview"
+      @close="showReschedule = false"
+      @scheduled="handleRescheduled"
+    />
 
     <!-- Edit Details Modal -->
     <Teleport to="body">

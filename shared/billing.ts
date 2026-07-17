@@ -73,11 +73,13 @@ export const ACTIVE_ROLE_LIMITS: Record<BillingTier, number> = {
 export const FREE_PLAN_ANALYSIS_LIMIT = 50
 
 /**
- * Lifetime allowance of outbound candidate emails for a Free organization.
- * Incoming replies never consume this allowance and remain readable after the
+ * Number of distinct candidate conversations a Free organization may start.
+ * Messaging within a started conversation is unlimited — only opening a new
+ * thread (a first outbound message, including an interview request) consumes a
+ * slot. Incoming replies never consume the allowance and stay readable after the
  * limit is reached. Paid plans have unlimited candidate messaging.
  */
-export const FREE_PLAN_CANDIDATE_MESSAGE_LIMIT = 5
+export const FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT = 5
 
 /**
  * Paid, self-serve plans. Mirrors the marketing pricing page (pricing-v5). Free

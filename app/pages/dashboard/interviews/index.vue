@@ -502,6 +502,13 @@ const statusCounts = computed(() => {
                   </span>
                 </div>
 
+                <div class="mt-2">
+                  <InterviewCandidateResponse
+                    :response="interviewItem.candidateResponse"
+                    :responded-at="interviewItem.candidateRespondedAt"
+                  />
+                </div>
+
                 <!-- Schedule details -->
                 <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-surface-400 dark:text-surface-500">
                   <TimelineDateLink :date="interviewItem.scheduledAt" class="inline-flex items-center gap-1 font-medium" :class="isUpcoming(interviewItem.scheduledAt) ? 'text-brand-600 dark:text-brand-400' : ''">
@@ -655,6 +662,10 @@ const statusCounts = computed(() => {
                     >
                       {{ statusConfig[interviewItem.status]?.label }}
                     </span>
+                    <InterviewCandidateResponse
+                      :response="interviewItem.candidateResponse"
+                      :responded-at="interviewItem.candidateRespondedAt"
+                    />
                   </div>
                   <p class="mt-1 text-sm font-medium">
                     <NuxtLink

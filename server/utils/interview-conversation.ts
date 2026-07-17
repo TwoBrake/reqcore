@@ -1,11 +1,12 @@
-import { and, count, desc, eq, ne, sql } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import {
   candidateConversation,
   candidateMessage,
   interview,
   organization,
 } from '../database/schema'
-import { FREE_PLAN_CANDIDATE_MESSAGE_LIMIT, type BillingTier } from '../../shared/billing'
+import { type BillingTier } from '../../shared/billing'
+import { canSendIntoConversation } from '../../ee/server/utils/candidate-message-allowance'
 import { sendCandidateMessageEmail } from './email'
 import {
   appendReference,
@@ -250,13 +251,11 @@ export async function sendInterviewConversationMessage(params: {
   const now = new Date()
   const reserved = await db.transaction(async (tx) => {
     if (!params.bypassAllowance && params.tier === 'free') {
+      // An interview request opens (or reuses) a candidate conversation. Sending
+      // into an already-started conversation is unlimited; a first message only
+      // goes through while the org has a free conversation slot left.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`candidate-message:${params.organizationId}`}))`)
-      const [{ value: used } = { value: 0 }] = await tx.select({ value: count() }).from(candidateMessage).where(and(
-        eq(candidateMessage.organizationId, params.organizationId),
-        eq(candidateMessage.direction, 'outbound'),
-        ne(candidateMessage.status, 'failed'),
-      ))
-      if (used >= FREE_PLAN_CANDIDATE_MESSAGE_LIMIT) return false
+      if (!(await canSendIntoConversation(params.organizationId, conversation.id, params.tier, tx))) return false
     }
 
     if (retryMessage) {
@@ -299,7 +298,7 @@ export async function sendInterviewConversationMessage(params: {
   })
 
   if (!reserved) {
-    const errorMessage = 'Free candidate email limit reached. Upgrade to preserve replies, confirmations, calendar updates, and shared history.'
+    const errorMessage = 'Free candidate conversation limit reached. Upgrade to preserve replies, confirmations, calendar updates, and shared history.'
     await persistFailedMessage({
       id: messageId,
       conversationId: conversation.id,

@@ -4,7 +4,7 @@ import {
   activeRoleLimitForTier,
   getBillingPlan,
   FREE_PLAN_ANALYSIS_LIMIT,
-  FREE_PLAN_CANDIDATE_MESSAGE_LIMIT,
+  FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT,
   tierHasFeature,
 } from '../../shared/billing'
 
@@ -51,8 +51,8 @@ describe('candidate messaging entitlement', () => {
     expect(tierHasFeature('scale', 'candidateMessaging')).toBe(true)
   })
 
-  it('exposes a five-message lifetime Free allowance', () => {
-    expect(FREE_PLAN_CANDIDATE_MESSAGE_LIMIT).toBe(5)
+  it('exposes a five-conversation Free allowance', () => {
+    expect(FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT).toBe(5)
   })
 })
 
