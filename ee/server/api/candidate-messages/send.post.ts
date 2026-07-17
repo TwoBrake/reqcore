@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 import {
   application,
   candidateConversation,
@@ -187,14 +187,29 @@ export default defineEventHandler(async (event) => {
       attachments: emailAttachments,
     })
     const sentAt = new Date()
+    // Only advance to "sent" if no provider status webhook has landed yet. A
+    // delivered/bounced/failed event can match this row by its `message` tag and
+    // write `providerStatusAt` before this post-send update runs; clobbering it
+    // with "sent" would leave the recruiter seeing a false status forever.
     const [sent] = await db.update(candidateMessage).set({
       status: 'sent',
       fromEmail: normalizeEmailAddress(result.from),
       providerMessageId: result.id,
       sentAt,
       updatedAt: sentAt,
-    }).where(and(eq(candidateMessage.id, body.requestId), eq(candidateMessage.organizationId, orgId))).returning()
-    return sent
+    }).where(and(
+      eq(candidateMessage.id, body.requestId),
+      eq(candidateMessage.organizationId, orgId),
+      isNull(candidateMessage.providerStatusAt),
+    )).returning()
+    if (sent) return sent
+
+    // A status webhook already advanced this row; return the authoritative state.
+    const [current] = await db.select().from(candidateMessage).where(and(
+      eq(candidateMessage.id, body.requestId),
+      eq(candidateMessage.organizationId, orgId),
+    )).limit(1)
+    return current
   }
   catch (error) {
     const failedAt = new Date()

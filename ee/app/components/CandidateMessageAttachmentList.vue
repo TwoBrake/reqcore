@@ -41,7 +41,7 @@ function formatSize(bytes: number) {
       class="mt-1 flex items-center gap-1 text-[11px] text-surface-400 dark:text-surface-500"
     >
       <ShieldAlert class="size-3 shrink-0" />
-      Sent by the candidate — scan before opening.
+      Candidate-provided attachment.
     </p>
   </div>
 </template>

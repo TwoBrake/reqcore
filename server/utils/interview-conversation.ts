@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 import {
   candidateConversation,
   candidateMessage,
@@ -343,13 +343,17 @@ export async function sendInterviewConversationMessage(params: {
     })
     const sentAt = new Date()
     await Promise.all([
+      // Only advance to "sent" if no provider status webhook has landed yet. A
+      // delivered/bounced/failed event can match this row by its `message` tag and
+      // write `providerStatusAt` before this post-send update runs; clobbering it
+      // with "sent" would leave the recruiter seeing a false status forever.
       db.update(candidateMessage).set({
         status: 'sent',
         fromEmail: normalizeEmailAddress(sendResult.from),
         providerMessageId: sendResult.id,
         sentAt,
         updatedAt: sentAt,
-      }).where(eq(candidateMessage.id, messageId)),
+      }).where(and(eq(candidateMessage.id, messageId), isNull(candidateMessage.providerStatusAt))),
       kind !== 'interview_cancellation'
         ? db.update(interview).set({ invitationSentAt: sentAt, updatedAt: sentAt }).where(eq(interview.id, record.id))
         : Promise.resolve(),

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import {
-  AlertCircle, Check, CheckCheck, Clock3, ExternalLink, Inbox, Mail, Paperclip, RefreshCw, Send,
+  AlertCircle, Check, CheckCheck, Clock3, ExternalLink, Inbox, Mail, Maximize2, Minimize2, Paperclip, RefreshCw, Send,
 } from 'lucide-vue-next'
 import {
   CANDIDATE_MESSAGE_ATTACHMENT_ACCEPT,
@@ -36,6 +36,7 @@ const {
 const body = ref('')
 const subject = ref('')
 const requestId = ref<string | null>(null)
+const expanded = ref(false)
 const {
   files: attachments,
   add: addAttachments,
@@ -248,7 +249,7 @@ onUnmounted(() => clearInterval(pollTimer))
 
     <form
       v-if="hasConversation || allowance.canSend"
-      class="w-full min-w-0 shrink-0 rounded-xl border border-surface-200/80 bg-white p-4 shadow-lg shadow-surface-900/[0.08] dark:border-surface-800/60 dark:bg-surface-900 dark:shadow-black/30"
+      class="w-full min-w-0 shrink-0 rounded-xl border border-surface-200 bg-white p-4 shadow-sm dark:border-surface-800 dark:bg-surface-900"
       @submit.prevent="submitMessage"
     >
       <label v-if="!hasConversation" class="mb-2 block">
@@ -258,7 +259,7 @@ onUnmounted(() => clearInterval(pollTimer))
           type="text"
           maxlength="300"
           placeholder="Subject"
-          class="h-10 w-full rounded-lg border border-surface-200 bg-white px-3 text-sm text-surface-800 placeholder:text-surface-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-surface-700 dark:bg-surface-800 dark:text-surface-100 dark:placeholder:text-surface-500"
+          class="h-11 w-full rounded-lg border border-surface-200 bg-white px-3.5 text-sm text-surface-800 placeholder:text-surface-400 transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-surface-700 dark:bg-surface-800 dark:text-surface-100 dark:placeholder:text-surface-500 dark:focus:border-brand-400 dark:focus:ring-brand-400/20"
           @input="requestId = null"
         />
       </label>
@@ -269,10 +270,10 @@ onUnmounted(() => clearInterval(pollTimer))
       />
       <div class="flex min-w-0 items-end gap-2">
         <label
-          class="grid size-11 shrink-0 cursor-pointer place-items-center rounded-lg border border-surface-200 text-surface-500 transition-colors hover:bg-surface-100 dark:border-surface-700 dark:text-surface-400 dark:hover:bg-surface-800"
+          class="grid size-11 shrink-0 cursor-pointer place-items-center rounded-lg border border-surface-200 text-surface-400 transition-colors hover:border-surface-300 hover:bg-surface-50 hover:text-surface-600 dark:border-surface-700 dark:text-surface-500 dark:hover:border-surface-600 dark:hover:bg-surface-800 dark:hover:text-surface-300"
           title="Attach files"
         >
-          <Paperclip class="size-4" />
+          <Paperclip class="size-[18px]" />
           <input
             type="file"
             multiple
@@ -284,17 +285,26 @@ onUnmounted(() => clearInterval(pollTimer))
         </label>
         <textarea
           v-model="body"
-          rows="2"
           maxlength="20000"
           :placeholder="hasConversation ? 'Write a reply…' : 'Write a message…'"
-          class="max-h-40 min-h-12 min-w-0 flex-1 resize-y rounded-lg border border-surface-200 bg-white px-3 py-2 text-sm text-surface-800 placeholder:text-surface-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-surface-700 dark:bg-surface-800 dark:text-surface-100 dark:placeholder:text-surface-500"
+          class="min-w-0 flex-1 resize-none rounded-lg border border-surface-200 bg-white px-3.5 py-2.5 text-sm leading-relaxed text-surface-800 transition-[height] placeholder:text-surface-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-surface-700 dark:bg-surface-800 dark:text-surface-100 dark:placeholder:text-surface-500 dark:focus:border-brand-400 dark:focus:ring-brand-400/20"
+          :class="expanded ? 'h-44' : 'h-11'"
           @input="requestId = null"
           @keydown.enter.meta.prevent="submitMessage"
           @keydown.enter.ctrl.prevent="submitMessage"
         />
         <button
+          type="button"
+          class="grid size-11 shrink-0 cursor-pointer place-items-center rounded-lg border border-surface-200 text-surface-400 transition-colors hover:border-surface-300 hover:bg-surface-50 hover:text-surface-600 dark:border-surface-700 dark:text-surface-500 dark:hover:border-surface-600 dark:hover:bg-surface-800 dark:hover:text-surface-300"
+          :title="expanded ? 'Minimize' : 'Expand'"
+          @click="expanded = !expanded"
+        >
+          <Minimize2 v-if="expanded" class="size-[18px]" />
+          <Maximize2 v-else class="size-[18px]" />
+        </button>
+        <button
           type="submit"
-          class="inline-flex h-11 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-brand-600 px-3.5 text-sm font-medium text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-brand-500 dark:hover:bg-brand-400"
+          class="inline-flex h-11 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-brand-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-brand-500 dark:hover:bg-brand-400"
           :disabled="isSending || !body.trim() || (!hasConversation && !subject.trim())"
         >
           <RefreshCw v-if="isSending" class="size-4 animate-spin" />
@@ -302,10 +312,10 @@ onUnmounted(() => clearInterval(pollTimer))
           <span class="hidden sm:inline">Send</span>
         </button>
       </div>
-      <div class="mt-2 flex items-end justify-between gap-3">
+      <div class="mt-2.5 flex items-end justify-between gap-3 px-1">
         <p class="min-w-0 break-words px-0.5 text-[11px] text-surface-400 [overflow-wrap:anywhere] dark:text-surface-500">
           <template v-if="allowance.remaining != null && !hasConversation"><span class="font-semibold text-surface-500 dark:text-surface-400">{{ allowance.remaining }} of {{ allowance.limit }} free conversations left.</span> Starting this uses one; replies stay unlimited. </template>
-          Messages are emailed to {{ candidateEmail }}. <kbd class="font-mono">⌘</kbd>+<kbd class="font-mono">Enter</kbd> to send.
+          Messages are emailed to {{ candidateEmail }}. <kbd class="rounded border border-surface-200 bg-surface-50 px-1 py-px font-mono text-[10px] font-medium text-surface-500 dark:border-surface-700 dark:bg-surface-800 dark:text-surface-400">⌘</kbd><kbd class="rounded border border-surface-200 bg-surface-50 px-1 py-px font-mono text-[10px] font-medium text-surface-500 dark:border-surface-700 dark:bg-surface-800 dark:text-surface-400">Enter</kbd> to send.
         </p>
         <div class="flex shrink-0 items-center gap-1">
           <NuxtLink
