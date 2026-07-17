@@ -1,14 +1,14 @@
-export type DatabaseUrlEnvironment = Partial<Record<
-  | 'DATABASE_URL'
-  | 'PGHOST'
-  | 'PGPORT'
-  | 'PGUSER'
-  | 'PGPASSWORD'
-  | 'PGDATABASE'
-  | 'RAILWAY_TCP_PROXY_DOMAIN'
-  | 'RAILWAY_TCP_PROXY_PORT',
-  string | undefined
->>
+export interface DatabaseUrlEnvironment {
+  readonly [key: string]: string | undefined
+  readonly DATABASE_URL?: string
+  readonly PGHOST?: string
+  readonly PGPORT?: string
+  readonly PGUSER?: string
+  readonly PGPASSWORD?: string
+  readonly PGDATABASE?: string
+  readonly RAILWAY_TCP_PROXY_DOMAIN?: string
+  readonly RAILWAY_TCP_PROXY_PORT?: string
+}
 
 function value(source: DatabaseUrlEnvironment, key: keyof DatabaseUrlEnvironment): string {
   return source[key]?.trim() ?? ''
