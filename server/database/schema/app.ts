@@ -571,7 +571,7 @@ export const candidateConversation = pgTable('candidate_conversation', {
   index('candidate_conversation_last_message_at_idx').on(t.organizationId, t.lastMessageAt),
 ]))
 
-/** Durable text-only email content plus provider and RFC threading identities. */
+/** Durable email content plus provider and RFC threading identities. */
 export const candidateMessage = pgTable('candidate_message', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
@@ -608,6 +608,23 @@ export const candidateMessage = pgTable('candidate_message', {
   index('candidate_message_interview_id_idx').on(t.interviewId, t.createdAt),
   uniqueIndex('candidate_message_provider_id_idx').on(t.providerMessageId),
   uniqueIndex('candidate_message_internet_id_idx').on(t.internetMessageId),
+]))
+
+/** File metadata for message attachments. Raw bytes live in S3/MinIO. */
+export const candidateMessageAttachment = pgTable('candidate_message_attachment', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  messageId: text('message_id').notNull().references(() => candidateMessage.id, { onDelete: 'cascade' }),
+  storageKey: text('storage_key').notNull().unique(),
+  filename: text('filename').notNull(),
+  mimeType: text('mime_type').notNull(),
+  sizeBytes: integer('size_bytes').notNull(),
+  /** Resend attachment identity for replay-safe inbound webhook processing. */
+  providerAttachmentId: text('provider_attachment_id').unique(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (t) => ([
+  index('candidate_message_attachment_organization_id_idx').on(t.organizationId),
+  index('candidate_message_attachment_message_id_idx').on(t.messageId),
 ]))
 
 /** Resend delivers webhooks at least once; this table makes processing replay-safe. */
@@ -1027,11 +1044,17 @@ export const candidateConversationRelations = relations(candidateConversation, (
   messages: many(candidateMessage),
 }))
 
-export const candidateMessageRelations = relations(candidateMessage, ({ one }) => ({
+export const candidateMessageRelations = relations(candidateMessage, ({ one, many }) => ({
   organization: one(organization, { fields: [candidateMessage.organizationId], references: [organization.id] }),
   conversation: one(candidateConversation, { fields: [candidateMessage.conversationId], references: [candidateConversation.id] }),
   sentBy: one(user, { fields: [candidateMessage.sentById], references: [user.id] }),
   interview: one(interview, { fields: [candidateMessage.interviewId], references: [interview.id] }),
+  attachments: many(candidateMessageAttachment),
+}))
+
+export const candidateMessageAttachmentRelations = relations(candidateMessageAttachment, ({ one }) => ({
+  organization: one(organization, { fields: [candidateMessageAttachment.organizationId], references: [organization.id] }),
+  message: one(candidateMessage, { fields: [candidateMessageAttachment.messageId], references: [candidateMessage.id] }),
 }))
 
 export const calendarIntegrationRelations = relations(calendarIntegration, ({ one }) => ({

@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import {
   AlertCircle, ArrowLeft, Briefcase, Check, CheckCheck, ChevronDown, Clock3, Inbox,
-  Mail, Plus, RefreshCw, Search, Send, X,
+  Mail, Paperclip, Plus, RefreshCw, Search, Send, X,
 } from 'lucide-vue-next'
+import {
+  CANDIDATE_MESSAGE_ATTACHMENT_ACCEPT,
+  CANDIDATE_MESSAGE_MAX_ATTACHMENTS,
+} from '~~/shared/candidate-messaging'
 import { candidateMessageKindLabel } from '../composables/useCandidateMessages'
 import type { CandidateConversation, CandidateConversationSummary, CandidateMessageStatus } from '../composables/useCandidateMessages'
 
@@ -50,6 +54,18 @@ const isSending = ref(false)
 const replyBody = ref('')
 const replyRequestId = ref<string | null>(null)
 const composeRequestId = ref<string | null>(null)
+const {
+  files: replyAttachments,
+  add: addReplyAttachments,
+  remove: removeReplyAttachment,
+  clear: clearReplyAttachments,
+} = useCandidateMessageAttachments(() => { replyRequestId.value = null })
+const {
+  files: composeAttachments,
+  add: addComposeAttachments,
+  remove: removeComposeAttachment,
+  clear: clearComposeAttachments,
+} = useCandidateMessageAttachments(() => { composeRequestId.value = null })
 const compose = reactive({ applicationId: '', subject: '', body: '' })
 
 const activeJobId = computed(() => (isLocked.value ? props.jobId! : jobFilter.value) || undefined)
@@ -133,6 +149,9 @@ async function initializeInbox() {
 }
 
 async function selectConversation(conversation: CandidateConversationSummary) {
+  replyBody.value = ''
+  clearReplyAttachments()
+  replyRequestId.value = null
   selectedId.value = conversation.id
   if (props.syncRoute) {
     await router.replace({ query: { ...route.query, conversation: conversation.id, applicationId: undefined } })
@@ -159,6 +178,7 @@ async function openCompose(applicationId = '') {
   compose.applicationId = applicationId
   compose.subject = ''
   compose.body = ''
+  clearComposeAttachments()
   composeRequestId.value = null
   showCompose.value = true
 }
@@ -173,8 +193,10 @@ async function submitCompose() {
       requestId: composeRequestId.value,
       subject: compose.subject,
       body: compose.body,
+      attachments: composeAttachments.value,
     })
     showCompose.value = false
+    clearComposeAttachments()
     composeRequestId.value = null
     selectedId.value = selected.value?.id ?? null
     toast.success('Message sent')
@@ -195,8 +217,10 @@ async function submitReply() {
       requestId: replyRequestId.value,
       subject: selected.value.messages.at(-1)?.subject ?? `Regarding ${selected.value.application.job.title}`,
       body: replyBody.value,
+      attachments: replyAttachments.value,
     })
     replyBody.value = ''
+    clearReplyAttachments()
     replyRequestId.value = null
     toast.success('Message sent')
   } catch (err: any) {
@@ -509,6 +533,10 @@ onUnmounted(() => clearInterval(pollTimer))
                     ? 'rounded-2xl rounded-br-md bg-brand-600 text-white'
                     : 'rounded-2xl rounded-bl-md border border-surface-200 bg-white text-surface-800 dark:border-surface-800 dark:bg-surface-900 dark:text-surface-200'"
                 >{{ message.bodyText }}</div>
+                <CandidateMessageAttachmentList
+                  :attachments="message.attachments"
+                  :outbound="message.direction === 'outbound'"
+                />
                 <div class="mt-1 flex max-w-[88%] items-center gap-1.5 px-1 text-xs text-surface-400 sm:max-w-[76%]">
                   <span>{{ messageTime(message.createdAt) }}</span>
                   <template v-if="message.direction === 'outbound'">
@@ -531,7 +559,26 @@ onUnmounted(() => clearInterval(pollTimer))
 
         <form class="shrink-0 border-t border-surface-200 bg-white p-3 dark:border-surface-800 dark:bg-surface-950 sm:p-4" @submit.prevent="submitReply">
           <div class="mx-auto max-w-3xl">
+            <CandidateMessagePendingAttachments
+              :files="replyAttachments"
+              :disabled="isSending"
+              @remove="removeReplyAttachment"
+            />
             <div class="flex items-end gap-2">
+              <label
+                class="grid size-11 shrink-0 cursor-pointer place-items-center rounded-lg border border-surface-300 text-surface-500 transition-colors hover:bg-surface-100 dark:border-surface-700 dark:text-surface-400 dark:hover:bg-surface-800"
+                title="Attach files"
+              >
+                <Paperclip class="size-4" />
+                <input
+                  type="file"
+                  multiple
+                  class="sr-only"
+                  :accept="CANDIDATE_MESSAGE_ATTACHMENT_ACCEPT"
+                  :disabled="isSending || replyAttachments.length >= CANDIDATE_MESSAGE_MAX_ATTACHMENTS"
+                  @change="addReplyAttachments"
+                />
+              </label>
               <textarea
                 v-model="replyBody"
                 rows="2"
@@ -598,8 +645,27 @@ onUnmounted(() => clearInterval(pollTimer))
             <span class="mb-1.5 block text-xs font-medium text-surface-600 dark:text-surface-400">Message</span>
             <textarea v-model="compose.body" required rows="8" maxlength="20000" class="w-full resize-y rounded-lg border border-surface-300 bg-white px-3 py-2 text-sm text-surface-900 outline-none focus:border-brand-500 dark:border-surface-700 dark:bg-surface-950 dark:text-surface-100" @input="composeRequestId = null" />
           </label>
+          <CandidateMessagePendingAttachments
+            :files="composeAttachments"
+            :disabled="isSending"
+            @remove="removeComposeAttachment"
+          />
         </div>
         <footer class="flex items-center justify-end gap-2 border-t border-surface-200 px-4 py-3 dark:border-surface-800">
+          <label
+            class="grid size-9 shrink-0 cursor-pointer place-items-center rounded-lg border border-surface-300 text-surface-500 hover:bg-surface-50 dark:border-surface-700 dark:text-surface-400 dark:hover:bg-surface-800"
+            title="Attach files"
+          >
+            <Paperclip class="size-4" />
+            <input
+              type="file"
+              multiple
+              class="sr-only"
+              :accept="CANDIDATE_MESSAGE_ATTACHMENT_ACCEPT"
+              :disabled="isSending || composeAttachments.length >= CANDIDATE_MESSAGE_MAX_ATTACHMENTS"
+              @change="addComposeAttachments"
+            />
+          </label>
           <p v-if="allowance.limit != null" class="mr-auto text-xs text-surface-500 dark:text-surface-400">
             Uses 1 of <span class="font-semibold text-surface-700 dark:text-surface-200">{{ allowance.remaining }}</span> free conversations left. Replies stay unlimited.
           </p>

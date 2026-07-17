@@ -14,6 +14,12 @@ import { candidateInboxQuerySchema, sendCandidateMessageSchema } from '../../ee/
 import { candidateMessageReplyHint, formatCandidateMessageSender } from '../../server/utils/email'
 import { envSchema } from '../../server/utils/env'
 import { candidateMessageAllowanceFromUsage } from '../../ee/server/utils/candidate-message-allowance'
+import {
+  CandidateMessageAttachmentError,
+  shouldStoreInboundAttachment,
+  validateCandidateMessageAttachments,
+} from '../../ee/server/utils/candidate-message-attachments'
+import { CANDIDATE_MESSAGE_MAX_ATTACHMENTS } from '../../shared/candidate-messaging'
 
 const token = '0123456789abcdef0123456789abcdef'
 
@@ -188,5 +194,41 @@ describe('candidate message validation and configuration', () => {
       RESEND_REPLY_DOMAIN: 'https://reply.example.com',
     })
     expect(result.success).toBe(false)
+  })
+})
+
+describe('candidate message attachments', () => {
+  it('accepts a PDF based on its bytes and sanitizes its filename', async () => {
+    const [file] = await validateCandidateMessageAttachments([{
+      data: Buffer.from('%PDF-1.7\n% test document'),
+      filename: '../offer<final>.pdf',
+    }])
+
+    expect(file).toMatchObject({
+      filename: '_offer_final_.pdf',
+      mimeType: 'application/pdf',
+      extension: 'pdf',
+    })
+  })
+
+  it('rejects unsupported content even when the filename looks safe', async () => {
+    await expect(validateCandidateMessageAttachments([{
+      data: Buffer.from('not actually a PDF'),
+      filename: 'offer.pdf',
+    }])).rejects.toBeInstanceOf(CandidateMessageAttachmentError)
+  })
+
+  it('enforces the attachment count before processing file contents', async () => {
+    const files = Array.from({ length: CANDIDATE_MESSAGE_MAX_ATTACHMENTS + 1 }, (_, index) => ({
+      data: Buffer.from(`file-${index}`),
+      filename: `file-${index}.pdf`,
+    }))
+    await expect(validateCandidateMessageAttachments(files)).rejects.toThrow('Attach at most 5 files.')
+  })
+
+  it('ignores embedded signature images but keeps ordinary attachments', () => {
+    expect(shouldStoreInboundAttachment({ contentDisposition: 'inline', contentId: 'signature-logo' })).toBe(false)
+    expect(shouldStoreInboundAttachment({ contentDisposition: 'attachment', contentId: null })).toBe(true)
+    expect(shouldStoreInboundAttachment({ contentDisposition: 'inline', contentId: null })).toBe(true)
   })
 })

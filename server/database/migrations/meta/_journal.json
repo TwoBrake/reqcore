@@ -309,6 +309,13 @@
       "when": 1784213255082,
       "tag": "0043_goofy_fixer",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1784287195882,
+      "tag": "0044_candidate_message_attachments",
+      "breakpoints": true
     }
   ]
 }

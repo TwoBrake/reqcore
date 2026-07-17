@@ -3,9 +3,16 @@ import { and, eq, isNull, lte, or, sql } from 'drizzle-orm'
 import {
   candidateConversation,
   candidateMessage,
+  candidateMessageAttachment,
   candidateMessageWebhookEvent,
 } from '~~/server/database/schema'
 import { getResendClient, getResendReceivingClient } from '~~/server/utils/email'
+import { deleteFromS3, uploadToS3 } from '~~/server/utils/s3'
+import {
+  CANDIDATE_MESSAGE_MAX_ATTACHMENT_BYTES,
+  CANDIDATE_MESSAGE_MAX_ATTACHMENTS,
+  CANDIDATE_MESSAGE_MAX_TOTAL_ATTACHMENT_BYTES,
+} from '~~/shared/candidate-messaging'
 import { restoreCandidateForEngagement } from '~~/server/utils/candidate-retention'
 import {
   findReplyToken,
@@ -14,6 +21,12 @@ import {
   parseReferences,
 } from '../../utils/candidate-messaging'
 import { requireCandidateMessagingConfig } from '../../utils/candidate-messaging-config'
+import {
+  CandidateMessageAttachmentError,
+  shouldStoreInboundAttachment,
+  validateCandidateMessageAttachments,
+  type ValidatedCandidateMessageAttachment,
+} from '../../utils/candidate-message-attachments'
 
 const STATUS_BY_EVENT = {
   'email.sent': 'sent',
@@ -195,11 +208,124 @@ async function processInboundMessage(
     updatedAt: createdAt,
   }).onConflictDoNothing().returning({ id: candidateMessage.id })
 
+  const storedMessage = inserted ?? await db.query.candidateMessage.findFirst({
+    where: eq(candidateMessage.providerMessageId, data.id),
+    columns: { id: true },
+  })
+  if (!storedMessage) throw new Error('Inbound message could not be persisted')
+
   if (inserted) {
     await db.update(candidateConversation).set({
       unreadCount: sql`${candidateConversation.unreadCount} + 1`,
       lastMessageAt: createdAt,
       updatedAt: new Date(),
     }).where(eq(candidateConversation.id, conversation.id))
+  }
+
+  if (data.attachments.length > 0) {
+    await captureInboundAttachments({
+      resend,
+      emailId: data.id,
+      messageId: storedMessage.id,
+      orgId: conversation.organizationId,
+    })
+  }
+}
+
+async function captureInboundAttachments(input: {
+  resend: NonNullable<ReturnType<typeof getResendReceivingClient>>
+  emailId: string
+  messageId: string
+  orgId: string
+}): Promise<void> {
+  const { data: page, error } = await input.resend.emails.receiving.attachments.list({
+    emailId: input.emailId,
+  })
+  if (error || !page) throw new Error(error?.message ?? 'Inbound attachment metadata was unavailable')
+
+  const existing = await db.query.candidateMessageAttachment.findMany({
+    where: eq(candidateMessageAttachment.messageId, input.messageId),
+    columns: { providerAttachmentId: true, sizeBytes: true },
+  })
+  const existingProviderIds = new Set(existing.map(row => row.providerAttachmentId).filter(Boolean))
+  let storedCount = existing.length
+  let totalBytes = existing.reduce((sum, row) => sum + row.sizeBytes, 0)
+
+  for (const attachment of page.data) {
+    if (storedCount >= CANDIDATE_MESSAGE_MAX_ATTACHMENTS) break
+    if (existingProviderIds.has(attachment.id)) continue
+    if (!shouldStoreInboundAttachment({
+      contentDisposition: attachment.content_disposition,
+      contentId: attachment.content_id,
+    })) continue
+    if (attachment.size > CANDIDATE_MESSAGE_MAX_ATTACHMENT_BYTES) {
+      logWarn('candidate_message.inbound_attachment_skipped', {
+        organization_id: input.orgId,
+        reason: 'file_size_limit',
+      })
+      continue
+    }
+    if (totalBytes + attachment.size > CANDIDATE_MESSAGE_MAX_TOTAL_ATTACHMENT_BYTES) {
+      logWarn('candidate_message.inbound_attachment_skipped', {
+        organization_id: input.orgId,
+        reason: 'total_size_limit',
+      })
+      continue
+    }
+
+    const response = await fetch(attachment.download_url, { signal: AbortSignal.timeout(20_000) })
+    if (!response.ok) throw new Error(`Inbound attachment download failed with status ${response.status}`)
+    const fileData = Buffer.from(await response.arrayBuffer())
+
+    let validated: ValidatedCandidateMessageAttachment | undefined
+    try {
+      const files = await validateCandidateMessageAttachments([{
+        data: fileData,
+        filename: attachment.filename || 'attachment',
+      }])
+      validated = files[0]
+    }
+    catch (validationError) {
+      if (validationError instanceof CandidateMessageAttachmentError) {
+        logWarn('candidate_message.inbound_attachment_skipped', {
+          organization_id: input.orgId,
+          reason: validationError.message,
+        })
+        continue
+      }
+      throw validationError
+    }
+    if (!validated) continue
+
+    const id = crypto.randomUUID()
+    const storageKey = `${input.orgId}/candidate-messages/${input.messageId}/${id}.${validated.extension}`
+    await uploadToS3(storageKey, validated.data, validated.mimeType)
+    try {
+      const inserted = await db.insert(candidateMessageAttachment).values({
+        id,
+        organizationId: input.orgId,
+        messageId: input.messageId,
+        storageKey,
+        filename: validated.filename,
+        mimeType: validated.mimeType,
+        sizeBytes: validated.sizeBytes,
+        providerAttachmentId: attachment.id,
+      }).onConflictDoNothing({ target: candidateMessageAttachment.providerAttachmentId }).returning({
+        id: candidateMessageAttachment.id,
+      })
+      if (inserted.length === 0) {
+        await deleteFromS3(storageKey)
+        continue
+      }
+      storedCount++
+      totalBytes += validated.sizeBytes
+    }
+    catch (insertError) {
+      await deleteFromS3(storageKey).catch(cleanupError => logWarn('candidate_message.attachment_cleanup_failed', {
+        organization_id: input.orgId,
+        error_message: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+      }))
+      throw insertError
+    }
   }
 }

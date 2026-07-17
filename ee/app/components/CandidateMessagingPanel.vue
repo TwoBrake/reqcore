@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import {
-  AlertCircle, Check, CheckCheck, Clock3, ExternalLink, Inbox, Mail, RefreshCw, Send,
+  AlertCircle, Check, CheckCheck, Clock3, ExternalLink, Inbox, Mail, Paperclip, RefreshCw, Send,
 } from 'lucide-vue-next'
+import {
+  CANDIDATE_MESSAGE_ATTACHMENT_ACCEPT,
+  CANDIDATE_MESSAGE_MAX_ATTACHMENTS,
+} from '~~/shared/candidate-messaging'
 import { candidateMessageKindLabel } from '../composables/useCandidateMessages'
 import type { CandidateConversation, CandidateMessageStatus } from '../composables/useCandidateMessages'
 
@@ -32,6 +36,12 @@ const {
 const body = ref('')
 const subject = ref('')
 const requestId = ref<string | null>(null)
+const {
+  files: attachments,
+  add: addAttachments,
+  remove: removeAttachment,
+  clear: clearAttachments,
+} = useCandidateMessageAttachments(() => { requestId.value = null })
 const isSending = ref(false)
 
 const loading = computed(() => loadingList.value || loadingConversation.value)
@@ -92,8 +102,10 @@ async function submitMessage() {
       requestId: requestId.value,
       subject: messageSubject,
       body: trimmedBody,
+      attachments: attachments.value,
     })
     body.value = ''
+    clearAttachments()
     requestId.value = null
     toast.success('Message sent')
   } catch (err: any) {
@@ -234,6 +246,10 @@ onUnmounted(() => clearInterval(pollTimer))
               ? 'bg-brand-600 text-white shadow-sm shadow-brand-500/20 dark:bg-brand-500'
               : 'border border-surface-200/80 bg-white text-surface-800 shadow-sm shadow-surface-900/[0.03] dark:border-surface-800/60 dark:bg-surface-900 dark:text-surface-200 dark:shadow-none'"
           >{{ message.bodyText }}</div>
+          <CandidateMessageAttachmentList
+            :attachments="message.attachments"
+            :outbound="message.direction === 'outbound'"
+          />
           <div class="mt-1.5 flex max-w-[88%] flex-wrap items-center gap-2 px-1 text-xs text-surface-400 sm:max-w-[76%]">
             <span>{{ messageTime(message.createdAt) }}</span>
             <template v-if="message.direction === 'outbound'">
@@ -272,7 +288,26 @@ onUnmounted(() => clearInterval(pollTimer))
           @input="requestId = null"
         />
       </label>
+      <CandidateMessagePendingAttachments
+        :files="attachments"
+        :disabled="isSending"
+        @remove="removeAttachment"
+      />
       <div class="flex min-w-0 items-end gap-2">
+        <label
+          class="grid size-11 shrink-0 cursor-pointer place-items-center rounded-lg border border-surface-200 text-surface-500 transition-colors hover:bg-surface-100 dark:border-surface-700 dark:text-surface-400 dark:hover:bg-surface-800"
+          title="Attach files"
+        >
+          <Paperclip class="size-4" />
+          <input
+            type="file"
+            multiple
+            class="sr-only"
+            :accept="CANDIDATE_MESSAGE_ATTACHMENT_ACCEPT"
+            :disabled="isSending || attachments.length >= CANDIDATE_MESSAGE_MAX_ATTACHMENTS"
+            @change="addAttachments"
+          />
+        </label>
         <textarea
           v-model="body"
           rows="2"

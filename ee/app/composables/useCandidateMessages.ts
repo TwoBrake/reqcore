@@ -1,4 +1,5 @@
 import type { BillingTier } from '~~/shared/billing'
+import type { CandidateMessageAttachmentInfo } from '~~/shared/candidate-messaging'
 
 export type CandidateMessageKind = 'message' | 'interview_proposal' | 'interview_update' | 'interview_cancellation' | 'interview_response'
 
@@ -51,6 +52,7 @@ export interface CandidateConversation extends Omit<CandidateConversationSummary
     errorMessage: string | null
     calendarAttachmentStatus: 'not_applicable' | 'attached' | 'failed'
     calendarAttachmentError: string | null
+    attachments: CandidateMessageAttachmentInfo[]
     sentBy: { id: string, name: string, email: string } | null
   }>
 }
@@ -116,8 +118,16 @@ export function useCandidateMessages() {
     requestId: string
     subject: string
     body: string
+    attachments?: File[]
   }) {
-    const result = await $fetch('/api/candidate-messages/send', { method: 'POST', body: payload })
+    const form = new FormData()
+    form.append('applicationId', payload.applicationId)
+    form.append('requestId', payload.requestId)
+    form.append('subject', payload.subject)
+    form.append('body', payload.body)
+    for (const attachment of payload.attachments ?? []) form.append('attachments', attachment)
+
+    const result = await $fetch('/api/candidate-messages/send', { method: 'POST', body: form })
     await loadInbox()
     const conversation = conversations.value.find(item => item.applicationId === payload.applicationId)
     if (conversation) await loadConversation(conversation.id, { markRead: false })

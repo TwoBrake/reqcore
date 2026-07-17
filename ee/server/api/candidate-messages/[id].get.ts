@@ -50,7 +50,13 @@ export default defineEventHandler(async (event) => {
           errorMessage: true,
           createdAt: true,
         },
-        with: { sentBy: { columns: { id: true, name: true, email: true } } },
+        with: {
+          sentBy: { columns: { id: true, name: true, email: true } },
+          attachments: {
+            columns: { id: true, filename: true, mimeType: true, sizeBytes: true },
+            orderBy: (attachment, { asc }) => [asc(attachment.createdAt)],
+          },
+        },
       },
     },
   })

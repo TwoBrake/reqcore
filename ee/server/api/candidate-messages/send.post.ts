@@ -3,8 +3,10 @@ import {
   application,
   candidateConversation,
   candidateMessage,
+  candidateMessageAttachment,
 } from '~~/server/database/schema'
 import { sendCandidateMessageEmail } from '~~/server/utils/email'
+import { deleteFromS3, downloadFromS3, uploadToS3 } from '~~/server/utils/s3'
 import { FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT } from '~~/shared/billing'
 import {
   canSendIntoConversation,
@@ -17,6 +19,11 @@ import {
   replySubject,
 } from '../../utils/candidate-messaging'
 import { requireCandidateMessagingConfig } from '../../utils/candidate-messaging-config'
+import {
+  CandidateMessageAttachmentError,
+  validateCandidateMessageAttachments,
+  type ValidatedCandidateMessageAttachment,
+} from '../../utils/candidate-message-attachments'
 import { sendCandidateMessageSchema } from '../../utils/schemas/candidate-message'
 
 export default defineEventHandler(async (event) => {
@@ -24,7 +31,7 @@ export default defineEventHandler(async (event) => {
   const orgId = session.session.activeOrganizationId
   const tier = await assertPlanFeature(orgId, 'candidateMessaging')
   const { replyDomain } = requireCandidateMessagingConfig()
-  const body = await readValidatedBody(event, sendCandidateMessageSchema.parse)
+  const { body, files } = await readCandidateMessageRequest(event)
 
   const applicationRecord = await db.query.application.findFirst({
     where: and(eq(application.id, body.applicationId), eq(application.organizationId, orgId)),
@@ -148,6 +155,22 @@ export default defineEventHandler(async (event) => {
   if (alreadySent) return alreadySent
 
   try {
+    let attachments = await db.query.candidateMessageAttachment.findMany({
+      where: and(
+        eq(candidateMessageAttachment.messageId, body.requestId),
+        eq(candidateMessageAttachment.organizationId, orgId),
+      ),
+    })
+    if (attachments.length === 0 && files.length > 0) {
+      attachments = await persistOutboundAttachments(orgId, body.requestId, files)
+    }
+
+    const emailAttachments = await Promise.all(attachments.map(async attachment => ({
+      filename: attachment.filename,
+      content: (await downloadFromS3(attachment.storageKey)).toString('base64'),
+      contentType: attachment.mimeType,
+    })))
+
     const result = await sendCandidateMessageEmail({
       to: applicationRecord.candidate.email,
       subject,
@@ -160,6 +183,7 @@ export default defineEventHandler(async (event) => {
       organizationId: orgId,
       conversationId: conversation.id,
       messageId: body.requestId,
+      attachments: emailAttachments,
     })
     const sentAt = new Date()
     const [sent] = await db.update(candidateMessage).set({
@@ -188,3 +212,82 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 502, statusMessage: 'Message could not be sent. It is safe to retry.' })
   }
 })
+
+async function readCandidateMessageRequest(event: Parameters<typeof getHeader>[0]) {
+  const contentType = getHeader(event, 'content-type') ?? ''
+  if (!contentType.toLowerCase().includes('multipart/form-data')) {
+    return {
+      body: await readValidatedBody(event, sendCandidateMessageSchema.parse),
+      files: [] as ValidatedCandidateMessageAttachment[],
+    }
+  }
+
+  const form = await readMultipartFormData(event)
+  if (!form) throw createError({ statusCode: 400, statusMessage: 'No message data received' })
+
+  const field = (name: string) => form.find(part => part.name === name && !part.filename)?.data.toString('utf8')
+  const parsed = sendCandidateMessageSchema.safeParse({
+    applicationId: field('applicationId'),
+    requestId: field('requestId'),
+    subject: field('subject'),
+    body: field('body'),
+  })
+  if (!parsed.success) throw createError({ statusCode: 400, statusMessage: 'Invalid message data' })
+  const body = parsed.data
+
+  try {
+    const files = await validateCandidateMessageAttachments(
+      form
+        .filter(part => part.name === 'attachments' && part.filename)
+        .map(part => ({ data: part.data, filename: part.filename })),
+    )
+    return { body, files }
+  }
+  catch (error) {
+    if (error instanceof CandidateMessageAttachmentError) {
+      throw createError({ statusCode: error.statusCode, statusMessage: error.message })
+    }
+    throw error
+  }
+}
+
+async function persistOutboundAttachments(
+  orgId: string,
+  messageId: string,
+  files: ValidatedCandidateMessageAttachment[],
+) {
+  const attemptedKeys: string[] = []
+  try {
+    return await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`candidate-message-attachments:${messageId}`}))`)
+      const current = await tx.select().from(candidateMessageAttachment).where(and(
+        eq(candidateMessageAttachment.messageId, messageId),
+        eq(candidateMessageAttachment.organizationId, orgId),
+      ))
+      if (current.length > 0) return current
+
+      const values = files.map((file) => {
+        const id = crypto.randomUUID()
+        return {
+          id,
+          organizationId: orgId,
+          messageId,
+          storageKey: `${orgId}/candidate-messages/${messageId}/${id}.${file.extension}`,
+          filename: file.filename,
+          mimeType: file.mimeType,
+          sizeBytes: file.sizeBytes,
+          data: file.data,
+        }
+      })
+      for (const value of values) {
+        attemptedKeys.push(value.storageKey)
+        await uploadToS3(value.storageKey, value.data, value.mimeType)
+      }
+      return tx.insert(candidateMessageAttachment).values(values.map(({ data: _, ...value }) => value)).returning()
+    })
+  }
+  catch (error) {
+    await Promise.allSettled(attemptedKeys.map(key => deleteFromS3(key)))
+    throw error
+  }
+}

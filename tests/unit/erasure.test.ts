@@ -11,6 +11,7 @@ interface MockOpts {
   candidateExists?: boolean
   documents?: string[]
   applications?: string[]
+  messageAttachments?: string[]
   interviews?: string[]
   comments?: unknown[]
   properties?: unknown[]
@@ -56,6 +57,11 @@ function makeDb(opts: MockOpts) {
         ),
       },
       application: { findMany: vi.fn(async () => (opts.applications ?? []).map(id => ({ id }))) },
+      candidateConversation: { findMany: vi.fn(async () => (opts.applications ?? []).map(id => ({ id: `conversation-${id}` }))) },
+      candidateMessage: { findMany: vi.fn(async () => (opts.applications ?? []).map(id => ({ id: `message-${id}` }))) },
+      candidateMessageAttachment: {
+        findMany: vi.fn(async () => (opts.messageAttachments ?? []).map(storageKey => ({ storageKey }))),
+      },
       interview: { findMany: vi.fn(async () => (opts.interviews ?? []).map(id => ({ id }))) },
     },
     select: vi.fn(() => ({
@@ -112,6 +118,7 @@ describe('eraseCandidates', () => {
       candidateExists: true,
       documents: ['k1', 'k2'],
       applications: ['a1'],
+      messageAttachments: ['message-file'],
       interviews: ['i1'],
       comments: [{}, {}],
       properties: [{}],
@@ -121,7 +128,8 @@ describe('eraseCandidates', () => {
     const report = await eraseCandidates('org1', ['c1'], { actorId: 'u1' })
 
     expect(report.results[0].status).toBe('erased')
-    expect(deleteFromS3).toHaveBeenCalledTimes(2)
+    expect(deleteFromS3).toHaveBeenCalledTimes(3)
+    expect(deleteFromS3).toHaveBeenCalledWith('message-file')
     expect(m.transaction).toHaveBeenCalledTimes(1)
     // 4 polymorphic/graph deletes inside the transaction.
     expect(m.txDelete).toHaveBeenCalledTimes(4)
