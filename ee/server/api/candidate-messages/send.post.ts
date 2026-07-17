@@ -8,6 +8,7 @@ import {
 import { sendCandidateMessageEmail } from '~~/server/utils/email'
 import { deleteFromS3, downloadFromS3, uploadToS3 } from '~~/server/utils/s3'
 import { FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT } from '~~/shared/billing'
+import { CANDIDATE_MESSAGE_MAX_REQUEST_BYTES } from '~~/shared/candidate-messaging'
 import {
   canSendIntoConversation,
   countStartedConversations,
@@ -220,6 +221,14 @@ async function readCandidateMessageRequest(event: Parameters<typeof getHeader>[0
       body: await readValidatedBody(event, sendCandidateMessageSchema.parse),
       files: [] as ValidatedCandidateMessageAttachment[],
     }
+  }
+
+  // Reject oversized bodies from the declared Content-Length before
+  // readMultipartFormData buffers the whole request into memory. The per-file
+  // and total-size limits below still apply to the actual bytes.
+  const declaredBytes = Number(getHeader(event, 'content-length'))
+  if (Number.isFinite(declaredBytes) && declaredBytes > CANDIDATE_MESSAGE_MAX_REQUEST_BYTES) {
+    throw createError({ statusCode: 413, statusMessage: 'Attachments can be at most 20 MB in total.' })
   }
 
   const form = await readMultipartFormData(event)
