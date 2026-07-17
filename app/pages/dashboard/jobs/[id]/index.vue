@@ -843,13 +843,14 @@ async function handleInterviewScheduled() {
 
   if (wasRescheduled) return
 
-  // Transition the application status to 'interview' after scheduling
+  // Scheduling moves the candidate into the interview stage server-side. Refresh
+  // the pipeline to reflect that, and when the transition applies, follow the
+  // candidate to the interview column so the user sees the scheduled interview.
   if (currentSummary.value && currentSummary.value.status !== 'interview') {
     const allowed = APPLICATION_STATUS_TRANSITIONS[currentSummary.value.status] ?? []
     if (allowed.includes('interview')) {
-      await changeStatus('interview')
+      await refreshApps()
 
-      // Follow the candidate to the interview column so the user sees the scheduled interview
       if (scheduledApplicationId) {
         focusStatus.value = 'interview'
         await nextTick()

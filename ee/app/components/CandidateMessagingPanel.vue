@@ -169,32 +169,6 @@ onUnmounted(() => clearInterval(pollTimer))
   />
 
   <div v-else class="flex h-full min-h-0 min-w-0 flex-col gap-4 overflow-hidden">
-    <div class="flex min-w-0 shrink-0 items-center justify-between gap-3">
-      <h2 class="flex items-center gap-2 text-sm font-semibold text-surface-800 dark:text-surface-200">
-        <Mail class="size-4 text-surface-400 dark:text-surface-500" />
-        Messages
-      </h2>
-      <div class="flex shrink-0 items-center gap-1.5">
-        <NuxtLink
-          :to="inboxLink"
-          class="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-surface-200 px-2.5 py-1.5 text-xs font-medium text-surface-600 transition-all duration-150 hover:border-surface-300 hover:bg-white dark:border-surface-700/80 dark:text-surface-300 dark:hover:border-surface-600 dark:hover:bg-surface-800"
-        >
-          <Inbox class="size-3.5" />
-          Open in inbox
-          <ExternalLink class="size-3 opacity-60" />
-        </NuxtLink>
-        <button
-          type="button"
-          title="Refresh messages"
-          class="grid size-8 shrink-0 cursor-pointer place-items-center rounded-lg border border-surface-200 text-surface-500 transition-all duration-150 hover:border-surface-300 hover:bg-white hover:text-surface-800 disabled:cursor-not-allowed disabled:opacity-50 dark:border-surface-700/80 dark:text-surface-400 dark:hover:border-surface-600 dark:hover:bg-surface-800 dark:hover:text-surface-100"
-          :disabled="loading"
-          @click="refreshThread"
-        >
-          <RefreshCw class="size-3.5" :class="loading ? 'animate-spin' : ''" />
-        </button>
-      </div>
-    </div>
-
     <div class="scrollbar-thin min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
       <div v-if="!billingResolved || (loading && messages.length === 0)" class="py-12 text-center text-surface-400">
         <div class="mx-auto mb-3 size-6 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600 dark:border-brand-800 dark:border-t-brand-400" />
@@ -328,10 +302,31 @@ onUnmounted(() => clearInterval(pollTimer))
           <span class="hidden sm:inline">Send</span>
         </button>
       </div>
-      <p class="mt-2 break-words px-0.5 text-[11px] text-surface-400 [overflow-wrap:anywhere] dark:text-surface-500">
-        <template v-if="allowance.remaining != null && !hasConversation"><span class="font-semibold text-surface-500 dark:text-surface-400">{{ allowance.remaining }} of {{ allowance.limit }} free conversations left.</span> Starting this uses one; replies stay unlimited. </template>
-        Messages are emailed to {{ candidateEmail }}. <kbd class="font-mono">⌘</kbd>+<kbd class="font-mono">Enter</kbd> to send.
-      </p>
+      <div class="mt-2 flex items-end justify-between gap-3">
+        <p class="min-w-0 break-words px-0.5 text-[11px] text-surface-400 [overflow-wrap:anywhere] dark:text-surface-500">
+          <template v-if="allowance.remaining != null && !hasConversation"><span class="font-semibold text-surface-500 dark:text-surface-400">{{ allowance.remaining }} of {{ allowance.limit }} free conversations left.</span> Starting this uses one; replies stay unlimited. </template>
+          Messages are emailed to {{ candidateEmail }}. <kbd class="font-mono">⌘</kbd>+<kbd class="font-mono">Enter</kbd> to send.
+        </p>
+        <div class="flex shrink-0 items-center gap-1">
+          <NuxtLink
+            :to="inboxLink"
+            class="inline-flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-surface-400 transition-colors hover:bg-surface-100 hover:text-surface-700 dark:text-surface-500 dark:hover:bg-surface-800 dark:hover:text-surface-200"
+          >
+            <Inbox class="size-3" />
+            <span class="hidden sm:inline">Open in inbox</span>
+            <ExternalLink class="size-2.5 opacity-60" />
+          </NuxtLink>
+          <button
+            type="button"
+            title="Refresh messages"
+            class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-md text-surface-400 transition-colors hover:bg-surface-100 hover:text-surface-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-surface-500 dark:hover:bg-surface-800 dark:hover:text-surface-200"
+            :disabled="loading"
+            @click="refreshThread"
+          >
+            <RefreshCw class="size-3" :class="loading ? 'animate-spin' : ''" />
+          </button>
+        </div>
+      </div>
     </form>
     <CandidateMessageUpgradePrompt v-else class="min-w-0 shrink-0" />
   </div>
