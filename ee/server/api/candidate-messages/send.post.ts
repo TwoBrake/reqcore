@@ -246,11 +246,18 @@ async function readCandidateMessageRequest(event: Parameters<typeof getHeader>[0
     }
   }
 
-  // Reject oversized bodies from the declared Content-Length before
-  // readMultipartFormData buffers the whole request into memory. The per-file
-  // and total-size limits below still apply to the actual bytes.
+  // Bound how much we buffer into memory before readMultipartFormData reads the
+  // body. A finite Content-Length is required: Node frames the request body to
+  // exactly that many bytes, so validating the header here caps the actual
+  // buffered size. This also rejects chunked/Transfer-Encoding uploads that omit
+  // Content-Length — those would otherwise skip this guard and let the body grow
+  // unbounded in memory. The per-file and total-size limits below still apply to
+  // the actual bytes received.
   const declaredBytes = Number(getHeader(event, 'content-length'))
-  if (Number.isFinite(declaredBytes) && declaredBytes > CANDIDATE_MESSAGE_MAX_REQUEST_BYTES) {
+  if (!Number.isFinite(declaredBytes)) {
+    throw createError({ statusCode: 411, statusMessage: 'A Content-Length header is required for attachment uploads.' })
+  }
+  if (declaredBytes > CANDIDATE_MESSAGE_MAX_REQUEST_BYTES) {
     throw createError({ statusCode: 413, statusMessage: 'Attachments can be at most 20 MB in total.' })
   }
 
