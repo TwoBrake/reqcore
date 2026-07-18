@@ -21,6 +21,64 @@ Format follows [Keep a Changelog](https://keepachangelog.com). Categories: **Add
 
 ---
 
+## [1.6.0](https://github.com/reqcore-inc/reqcore/compare/v1.5.0...v1.6.0) (2026-07-18)
+
+
+### ✨ Features
+
+* add ApplicationBuilderPreview and ApplicationFormBody components for candidate application preview and submission ([5118b6e](https://github.com/reqcore-inc/reqcore/commit/5118b6edb875296e5884f2eeed07a15c705b0857))
+* add branded career pages, ai config, and models ([7e9bcf6](https://github.com/reqcore-inc/reqcore/commit/7e9bcf627cd1ab66e972bfb431204611c2043847))
+* add end-to-end tests for privacy retention and GDPR compliance flows ([a0e2b58](https://github.com/reqcore-inc/reqcore/commit/a0e2b584cef92342fe46fe79daefb75ddc3c9272))
+* add public pricing section component and onboarding survey ([38e32a9](https://github.com/reqcore-inc/reqcore/commit/38e32a9e7b7a4cb23652cddebd9da32dda0cb197))
+* **ai:** implement budget management and observability for AI analysis runs ([f7a18f6](https://github.com/reqcore-inc/reqcore/commit/f7a18f6d70442931cb08749586f52bda34cb1abb))
+* **billing:** add billing plans and authorization logic ([86dd691](https://github.com/reqcore-inc/reqcore/commit/86dd6917befc8c2383872b6313ef0b6f95b3cbaa))
+* **billing:** add Stripe billing ([48a961c](https://github.com/reqcore-inc/reqcore/commit/48a961c8fe8c6a625cfc2dc423c25b1b3d96394a))
+* **billing:** enable Stripe promotion codes ([357c9b1](https://github.com/reqcore-inc/reqcore/commit/357c9b1ed61060570030670a50fe4ced54c8a9a8))
+* enable GDPR cleanup sweep in E2E tests and validate cleanup response ([dd16794](https://github.com/reqcore-inc/reqcore/commit/dd16794c4a8d720bc8ae196b650d178394212b5a))
+* enforce demo account isolation and organization access restrictions ([f47296e](https://github.com/reqcore-inc/reqcore/commit/f47296e91bcc3dad116d25152d8791a7d999c054))
+* enforce demo account isolation and organization access restrictions ([72433b9](https://github.com/reqcore-inc/reqcore/commit/72433b9c23bc0a9aaa28c03db36c97e86f01e0cf))
+* enhance GDPR retention and erasure processes with improved confirmation and settings ([6e110c3](https://github.com/reqcore-inc/reqcore/commit/6e110c36fe007b131080025a2bb4c3b147091370))
+* enhance job creation wizard with validation and schema updates; limit questions and criteria ([b128764](https://github.com/reqcore-inc/reqcore/commit/b12876452e1a35c4b9a7e578c6115379aebba03b))
+* enhance job question validation and update schemas; add question state validation and tests ([18bdd9f](https://github.com/reqcore-inc/reqcore/commit/18bdd9f7952bd69384f63223012b99c2fe4af10b))
+* handle organization update and delete errors with proper error handling ([989cca3](https://github.com/reqcore-inc/reqcore/commit/989cca3c21359e2dc788c96d91fa8596a9b17de5))
+* implement candidate erasure service and GDPR retention logic ([8692040](https://github.com/reqcore-inc/reqcore/commit/869204063470a88b060b03a33f353250545291ac))
+* implement candidate erasure service and GDPR retention logic ([b2910f8](https://github.com/reqcore-inc/reqcore/commit/b2910f8592b8a92936076c494f6710c5c11f7a79))
+* implement candidate retention and erasure processes ([7ee6ee3](https://github.com/reqcore-inc/reqcore/commit/7ee6ee315a1c9293e1777f8f1992b486fbda1085))
+* implement onboarding survey database storage ([ec6c3a0](https://github.com/reqcore-inc/reqcore/commit/ec6c3a0ee3d241e52e7f5bd4983530aa7f417904))
+* **jobs:** polish job creation wizard ([1926a8a](https://github.com/reqcore-inc/reqcore/commit/1926a8a3ff3d0a2fee39b4608e303dd48d899f0b))
+* Redesign application confirmation page ([0ae894f](https://github.com/reqcore-inc/reqcore/commit/0ae894fe1f84a2644def8d372ce576d55c72609f))
+* Refactor interview scheduling and add messaging ([88bdece](https://github.com/reqcore-inc/reqcore/commit/88bdece8b1b77e76954baafae3f9f1905b1f14fa))
+* transition to open-core model ([e0944b0](https://github.com/reqcore-inc/reqcore/commit/e0944b01461f80cdd0f899db7e54a839c5b85031))
+* update demo showcase to redirect to sign-in with prefilled demo credentials ([5625a56](https://github.com/reqcore-inc/reqcore/commit/5625a56aa57ac08a22fdeb943fe099b9f4e60934))
+* update dialog type for candidate erasure confirmation and refine legal hold handling in delete API ([bd2d156](https://github.com/reqcore-inc/reqcore/commit/bd2d156948545fd1b9e8367f35b2eec510aab7a1))
+
+
+### 🐛 Bug Fixes
+
+* align self-hosted billing copy ([b023b71](https://github.com/reqcore-inc/reqcore/commit/b023b71fd11036994d193ca7f642c97a06bd7d9d))
+* **e2e:** handle onboarding survey redirect after org creation ([3ed0630](https://github.com/reqcore-inc/reqcore/commit/3ed06307880b7d0cfb5bf5eff7b89d52bd5de450))
+* improve log handling in migration and S3 bucket readiness checks ([29fa699](https://github.com/reqcore-inc/reqcore/commit/29fa699bd64d8facb4828b668ddf1c4362ac9035))
+* refine rate limiting logic for production environment ([0d9c219](https://github.com/reqcore-inc/reqcore/commit/0d9c21917b10981788017940bc15eddb3a5b1eae))
+* sync npm lockfile ([e6d884e](https://github.com/reqcore-inc/reqcore/commit/e6d884e366a339edf1961976f1285d015d737306))
+* tolerate partial stripe billing env ([c9d702f](https://github.com/reqcore-inc/reqcore/commit/c9d702f20d2608d70918ac823d124c842d5040d6))
+
+
+### ♻️ Refactoring
+
+* remove JobQuestions component to streamline job wizard UI ([69ace61](https://github.com/reqcore-inc/reqcore/commit/69ace611d11ac8c557803b94e33d906cdbf16e11))
+* remove unused aiScoringChosen state and update form storage logic; add debug sign-in page script ([9b20abd](https://github.com/reqcore-inc/reqcore/commit/9b20abd91c3150596b1f882e80fc9cb1cfb7cae0))
+* update comments to clarify indexing rules for public marketing pages ([c919014](https://github.com/reqcore-inc/reqcore/commit/c919014db4ed60763802ab1577339893d341b396))
+
+
+### 🧪 Testing
+
+* enhance organization delete error handling in auth client tests ([d533052](https://github.com/reqcore-inc/reqcore/commit/d533052ec7d423310240d75bf7a4a7e54b4b5947))
+
+
+### 🏗️ Build & CI
+
+* wait for migration startup log ([24f5136](https://github.com/reqcore-inc/reqcore/commit/24f513685f9825040b60f9d3516689c80376523e))
+
 ## [1.5.0](https://github.com/reqcore-inc/reqcore/compare/v1.4.0...v1.5.0) (2026-05-17)
 
 
