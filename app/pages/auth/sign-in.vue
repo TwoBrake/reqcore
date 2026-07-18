@@ -93,13 +93,6 @@ async function handleSignIn() {
                 result.error.message && result.error.message !== "Server Error"
                     ? result.error.message
                     : 'Sign-in failed due to a server error. If you are self-hosting, make sure the BETTER_AUTH_URL environment variable is set to your deployment domain (e.g. "https://your-app.up.railway.app") and redeploy.';
-        } else if (
-            result.error.code === "EMAIL_NOT_VERIFIED" ||
-            result.error.status === 403
-        ) {
-            // The server re-sends a fresh verification link on this attempt.
-            error.value =
-                "Please verify your email before signing in. We've sent a new verification link to your inbox.";
         } else {
             error.value =
                 result.error.message ??

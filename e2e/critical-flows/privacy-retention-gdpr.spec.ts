@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import postgres from 'postgres'
-import { test, expect, declineAnalyticsConsent } from '../fixtures'
+import { test, expect, declineAnalyticsConsent, e2eDatabaseUrl } from '../fixtures'
 
 type CreatedCandidate = {
   id: string
@@ -14,21 +13,6 @@ type CreatedJob = {
   id: string
   slug: string
   title: string
-}
-
-function databaseUrl(): string {
-  if (process.env.DATABASE_URL) return process.env.DATABASE_URL
-
-  const envFile = readFileSync(join(process.cwd(), '.env'), 'utf8')
-  const line = envFile
-    .split(/\r?\n/)
-    .find(entry => entry.trim().startsWith('DATABASE_URL='))
-  const value = line?.slice(line.indexOf('=') + 1).trim().replace(/^(['"])(.*)\1$/, '$2')
-
-  if (!value) {
-    throw new Error('DATABASE_URL is required to prepare time-dependent retention test data')
-  }
-  return value
 }
 
 async function createCandidate(
@@ -70,7 +54,7 @@ async function createOpenJob(
 }
 
 async function backdateForRetention(candidateIds: string[]) {
-  const sql = postgres(databaseUrl(), { max: 1 })
+  const sql = postgres(e2eDatabaseUrl(), { max: 1 })
   const oldDate = new Date()
   oldDate.setFullYear(oldDate.getFullYear() - 3)
 
@@ -94,7 +78,7 @@ async function backdateForRetention(candidateIds: string[]) {
 }
 
 async function grantRetentionEntitlement(orgSlug: string) {
-  const sql = postgres(databaseUrl(), { max: 1 })
+  const sql = postgres(e2eDatabaseUrl(), { max: 1 })
   const now = new Date()
   const periodEnd = new Date(now)
   periodEnd.setFullYear(periodEnd.getFullYear() + 1)

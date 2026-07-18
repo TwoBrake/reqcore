@@ -65,6 +65,7 @@ export default defineEventHandler(async (event) => {
     candidateFacingChanged: proposalFieldsChanged,
     notifyCandidate: body.notifyCandidate,
   })
+  if (notificationIntent) assertEmailVerified(session.user)
   const tier = notificationIntent
     ? await assertPlanFeature(orgId, 'candidateMessaging')
     : null

@@ -1,6 +1,7 @@
 import { and, eq, inArray } from 'drizzle-orm'
 import * as schema from '../../database/schema'
 import { assertDemoAccountCanUseOrg, getDemoAccountOrgIds, isDemoAccountEmail } from '../../utils/demoOrg'
+import { assertEmailVerified, isOrganizationInvitationSend } from '../../utils/email-verification'
 
 type AuthSession = NonNullable<Awaited<ReturnType<typeof auth.api.getSession>>>
 
@@ -140,6 +141,10 @@ export default defineEventHandler(async (event) => {
   try {
     const rawSession = await auth.api.getSession({ headers: event.headers })
     const session = rawSession ? await normalizeDemoActiveOrganization(rawSession) : null
+
+    if (session && isOrganizationInvitationSend(authPath, event.method)) {
+      assertEmailVerified(session.user)
+    }
 
     await enforceDemoOrganizationAuthRequest(event, authPath, session)
 

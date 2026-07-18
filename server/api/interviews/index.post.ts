@@ -8,6 +8,7 @@ import { sendInterviewConversationMessage } from '../../utils/interview-conversa
 
 export default defineEventHandler(async (event) => {
   const session = await requirePermission(event, { interview: ['create'] })
+  assertEmailVerified(session.user)
   const orgId = session.session.activeOrganizationId
 
   // Free scheduling is limited by the existing tracked conversation allowance.

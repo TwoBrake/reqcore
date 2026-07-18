@@ -102,11 +102,13 @@ export function buildInterviewConversationBody(params: {
 export async function sendInterviewConversationMessage(params: {
   interviewId: string
   organizationId: string
-  sender: { id: string, name?: string | null, email: string }
+  sender: { id: string, name?: string | null, email: string, emailVerified: boolean }
   tier: BillingTier
   bypassAllowance?: boolean
   retry?: boolean
 }): Promise<InterviewConversationDelivery> {
+  assertEmailVerified(params.sender)
+
   const record = await db.query.interview.findFirst({
     where: and(eq(interview.id, params.interviewId), eq(interview.organizationId, params.organizationId)),
     with: {

@@ -30,6 +30,7 @@ import { sendCandidateMessageSchema } from '../../utils/schemas/candidate-messag
 
 export default defineEventHandler(async (event) => {
   const session = await requirePermission(event, { candidateMessage: ['create'] })
+  assertEmailVerified(session.user)
   const orgId = session.session.activeOrganizationId
   const tier = await assertPlanFeature(orgId, 'candidateMessaging')
   const { replyDomain } = requireCandidateMessagingConfig()
