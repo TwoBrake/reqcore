@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import postgres from 'postgres'
 import { test, expect, declineAnalyticsConsent, e2eDatabaseUrl } from '../fixtures'
 
