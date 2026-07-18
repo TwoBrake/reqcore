@@ -8,6 +8,7 @@ import {
 import { type BillingTier } from '../../shared/billing'
 import { canSendIntoConversation } from '../../ee/server/utils/candidate-message-allowance'
 import { sendCandidateMessageEmail } from './email'
+import { assertOutboundMessageLimit } from './candidate-message-rate-limit'
 import {
   appendReference,
   candidateReplyAddress,
@@ -121,6 +122,13 @@ export async function sendInterviewConversationMessage(params: {
   if (record.application.candidate.quarantinedAt) {
     throw createError({ statusCode: 409, statusMessage: 'Restore this candidate before sending an interview proposal' })
   }
+
+  // Abuse guard: interview invitations share the outbound candidate-email
+  // channel, so they count against the same per-org rolling-hour cap. Throws
+  // 429 when the org has relayed too much mail this hour. Fails safe — for the
+  // create/update flows the interview row already persists and the recruiter
+  // can resend the invitation once the window clears.
+  await assertOutboundMessageLimit(params.organizationId)
 
   const org = await db.query.organization.findFirst({
     where: eq(organization.id, params.organizationId),

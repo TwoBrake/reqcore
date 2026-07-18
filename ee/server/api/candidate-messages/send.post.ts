@@ -6,6 +6,7 @@ import {
   candidateMessageAttachment,
 } from '~~/server/database/schema'
 import { sendCandidateMessageEmail } from '~~/server/utils/email'
+import { assertOutboundMessageLimit } from '~~/server/utils/candidate-message-rate-limit'
 import { deleteFromS3, downloadFromS3, uploadToS3 } from '~~/server/utils/s3'
 import { FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT } from '~~/shared/billing'
 import { CANDIDATE_MESSAGE_MAX_REQUEST_BYTES } from '~~/shared/candidate-messaging'
@@ -74,6 +75,13 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 409, statusMessage: 'Request ID has already been used' })
   }
   if (existing?.providerMessageId) return existing
+
+  // Abuse guard: cap outbound candidate emails per organization per rolling
+  // hour. Independent of the Free-tier conversation cap (which meters product
+  // usage) — this bounds how much mail one org can relay if a paid account is
+  // hijacked. Shared with interview invitations via the same counter. Runs
+  // after the idempotency check so retries don't consume budget.
+  await assertOutboundMessageLimit(orgId)
 
   const latestMessage = await db.query.candidateMessage.findFirst({
     where: eq(candidateMessage.conversationId, conversation.id),
