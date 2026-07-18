@@ -26,6 +26,15 @@ export async function restoreCandidateForPublicApplication(
   orgId: string,
   candidateId: string,
 ): Promise<boolean> {
+  return restoreCandidateForEngagement(orgId, candidateId, 'public_application')
+}
+
+/** Restore a quarantined candidate when they initiate fresh, verifiable engagement. */
+export async function restoreCandidateForEngagement(
+  orgId: string,
+  candidateId: string,
+  source: 'public_application' | 'candidate_message',
+): Promise<boolean> {
   const now = new Date()
   const [restored] = await db.update(candidate)
     .set({
@@ -44,11 +53,12 @@ export async function restoreCandidateForPublicApplication(
   if (!restored) return false
 
   await recordRetentionAudit(orgId, candidateId, 'restored', 'success', null, {
-    source: 'public_application',
+    source,
   })
-  logInfo('retention.candidate_restored_on_application', {
+  logInfo('retention.candidate_restored_on_engagement', {
     org_id: orgId,
     candidate_id: candidateId,
+    source,
   })
   return true
 }

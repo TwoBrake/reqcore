@@ -6,7 +6,7 @@ import {
   ChevronDown, Menu, X, Users, ChevronLeft,
   LayoutDashboard, Calendar, ArrowUpCircle,
   Sparkles, Radio, History,
-  MessageCircle, Languages, Lock,
+  MessageCircle, Languages, Lock, Inbox,
 } from 'lucide-vue-next'
 import type { PlanFeature } from '~~/shared/billing'
 
@@ -108,6 +108,7 @@ const jobTabs = computed(() => {
   return [
     { label: 'Pipeline', to: base, icon: Kanban, exact: true },
     { label: 'Table', to: `${base}/candidates`, icon: Table2, exact: true },
+    { label: 'Inbox', to: `${base}/inbox`, icon: Inbox, exact: true },
     { label: 'Application Form', to: `${base}/application-form`, icon: FileText, exact: true },
     { label: 'Source Tracking', to: `${base}/source-tracking`, icon: Radio, exact: true },
     { label: 'AI Analysis', to: `${base}/ai-analysis`, icon: Sparkles, exact: true },
@@ -124,6 +125,7 @@ const mainNav: Array<{ label: string; to: string; icon: typeof Briefcase; exact:
   { label: 'Jobs', to: '/dashboard/jobs', icon: Briefcase, exact: false },
   { label: 'Candidates', to: '/dashboard/candidates', icon: Users, exact: false },
   { label: 'Applications', to: '/dashboard/applications', icon: FileText, exact: false },
+  { label: 'Inbox', to: '/dashboard/inbox', icon: Inbox, exact: true, feature: 'candidateMessaging' },
   { label: 'Interviews', to: '/dashboard/interviews', icon: Calendar, exact: false },
   { label: 'Timeline', to: '/dashboard/timeline', icon: History, exact: true, feature: 'activityTimeline' },
   { label: 'Source Tracking', to: '/dashboard/source-tracking', icon: Radio, exact: true, feature: 'sourceAnalytics' },
@@ -166,7 +168,7 @@ function isActiveRoute(to: string, exact: boolean) {
   return route.path === localizedTo || route.path.startsWith(`${localizedTo}/`)
 }
 
-const primaryNavLabels = ['Dashboard', 'Jobs', 'Candidates', 'Applications', 'Interviews', 'Settings']
+const primaryNavLabels = ['Dashboard', 'Jobs', 'Candidates', 'Applications', 'Inbox', 'Interviews', 'Settings']
 const primaryNavItems = computed(() => navItems.value.filter(i => primaryNavLabels.includes(i.label)))
 const moreNavItems = computed(() => navItems.value.filter(i => !primaryNavLabels.includes(i.label)))
 

@@ -4,6 +4,8 @@ import {
   activeRoleLimitForTier,
   getBillingPlan,
   FREE_PLAN_ANALYSIS_LIMIT,
+  FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT,
+  tierHasFeature,
 } from '../../shared/billing'
 
 /**
@@ -38,6 +40,19 @@ describe('active-role limits', () => {
   it('agency is unlimited (non-finite) so the gate short-circuits', () => {
     expect(Number.isFinite(activeRoleLimitForTier('agency'))).toBe(false)
     expect(Number.isFinite(activeRoleLimitForTier('scale'))).toBe(true)
+  })
+})
+
+describe('candidate messaging entitlement', () => {
+  it('keeps inbox access available on every tier', () => {
+    expect(tierHasFeature('free', 'candidateMessaging')).toBe(true)
+    expect(tierHasFeature('solo', 'candidateMessaging')).toBe(true)
+    expect(tierHasFeature('team', 'candidateMessaging')).toBe(true)
+    expect(tierHasFeature('scale', 'candidateMessaging')).toBe(true)
+  })
+
+  it('exposes a five-conversation Free allowance', () => {
+    expect(FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT).toBe(5)
   })
 })
 

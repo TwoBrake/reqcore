@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveDatabaseUrl } from "./database-url";
 
 /**
  * Preprocessor that normalizes empty strings to undefined.
@@ -99,11 +100,24 @@ export const envSchema = z
       .optional(),
     /** Resend API key for transactional emails (invitations, etc.). When not set, emails are logged to console. */
     RESEND_API_KEY: emptyToUndefined.pipe(z.string().min(1)).optional(),
+    /** Full-access Resend API key used only to retrieve inbound candidate emails. */
+    RESEND_RECEIVING_API_KEY: emptyToUndefined.pipe(z.string().min(1)).optional(),
     /** Sender email address for Resend emails. Must be a verified domain in Resend. Defaults to "Reqcore <noreply@reqcore.com>". */
     RESEND_FROM_EMAIL: emptyToUndefined
       .pipe(z.string().min(1))
       .optional()
       .default("Reqcore <noreply@reqcore.com>"),
+    /** Reply-friendly sender identity used only for candidate conversations. */
+    RESEND_CANDIDATE_FROM_EMAIL: emptyToUndefined
+      .pipe(z.string().min(1))
+      .optional()
+      .default("Reqcore Messages <messages@reqcore.com>"),
+    /** Dedicated inbound subdomain used for per-conversation Reply-To addresses. */
+    RESEND_REPLY_DOMAIN: emptyToUndefined
+      .pipe(z.string().regex(/^(?!https?:\/\/)[a-z0-9.-]+$/i, 'Must be a domain name without a protocol'))
+      .optional(),
+    /** Signing secret for the Resend webhook that handles inbound mail and delivery events. */
+    RESEND_WEBHOOK_SECRET: emptyToUndefined.pipe(z.string().min(16)).optional(),
     /** SMTP hostname for outbound email (e.g. smtp.gmail.com). When set, SMTP is used instead of Resend. */
     SMTP_HOST: emptyToUndefined.pipe(z.string().min(1)).optional(),
     /** SMTP port. Defaults to 587 (STARTTLS). Use 465 for implicit TLS, 25 for unencrypted. */
@@ -330,7 +344,14 @@ export const env = new Proxy({} as z.infer<typeof envSchema>, {
 
     // Parse once on first access, then cache for all subsequent reads
     if (!(globalThis as Record<string, unknown>).__env) {
-      const result = envSchema.safeParse(process.env);
+      // Railway preview environments can inherit a DATABASE_URL whose service
+      // reference has an empty hostname. Migration and seed commands already
+      // recover from this using the individual PG/proxy variables; normalize
+      // the runtime value the same way before validating the complete config.
+      const result = envSchema.safeParse({
+        ...process.env,
+        DATABASE_URL: resolveDatabaseUrl(process.env),
+      });
       if (!result.success) {
         const missing = result.error.issues
           .map((i) => `  - ${i.path.join(".")}: ${i.message}`)
@@ -340,7 +361,7 @@ export const env = new Proxy({} as z.infer<typeof envSchema>, {
             `Ensure these variables are set in your Railway service (Settings → Variables).\n` +
             `Required: DATABASE_URL, BETTER_AUTH_SECRET, S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET\n` +
             `Required when not on Railway: BETTER_AUTH_URL (or generate a Railway domain)\n` +
-            `Optional: BETTER_AUTH_TRUSTED_ORIGINS, S3_REGION (default: us-east-1), S3_FORCE_PATH_STYLE (default: true), TRUSTED_PROXY_IP, DEMO_ORG_SLUG, RESEND_API_KEY, RESEND_FROM_EMAIL, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, SMTP_SECURE, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_DISCOVERY_URL, OIDC_PROVIDER_NAME, AUTH_GOOGLE_CLIENT_ID, AUTH_GOOGLE_CLIENT_SECRET, AUTH_GITHUB_CLIENT_ID, AUTH_GITHUB_CLIENT_SECRET, AUTH_MICROSOFT_CLIENT_ID, AUTH_MICROSOFT_CLIENT_SECRET, AUTH_MICROSOFT_TENANT_ID\n`,
+            `Optional: BETTER_AUTH_TRUSTED_ORIGINS, S3_REGION (default: us-east-1), S3_FORCE_PATH_STYLE (default: true), TRUSTED_PROXY_IP, DEMO_ORG_SLUG, RESEND_API_KEY, RESEND_RECEIVING_API_KEY, RESEND_FROM_EMAIL, RESEND_CANDIDATE_FROM_EMAIL, RESEND_REPLY_DOMAIN, RESEND_WEBHOOK_SECRET, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, SMTP_SECURE, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_DISCOVERY_URL, OIDC_PROVIDER_NAME, AUTH_GOOGLE_CLIENT_ID, AUTH_GOOGLE_CLIENT_SECRET, AUTH_GITHUB_CLIENT_ID, AUTH_GITHUB_CLIENT_SECRET, AUTH_MICROSOFT_CLIENT_ID, AUTH_MICROSOFT_CLIENT_SECRET, AUTH_MICROSOFT_TENANT_ID\n`,
         );
         throw result.error;
       }

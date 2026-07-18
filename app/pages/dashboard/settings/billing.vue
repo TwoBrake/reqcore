@@ -290,6 +290,7 @@ async function manageBilling() {
         v-if="freeUsage"
         :active-roles="freeUsage.activeRoles"
         :ai-analysis="freeUsage.aiAnalysis"
+        :candidate-conversations="freeUsage.candidateConversations"
         :can-manage="canManage"
         :processing="isProcessing === 'solo'"
         @upgrade="choosePlan('solo')"

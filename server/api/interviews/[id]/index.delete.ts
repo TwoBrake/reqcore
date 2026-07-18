@@ -11,11 +11,24 @@ export default defineEventHandler(async (event) => {
 
   const current = await db.query.interview.findFirst({
     where: and(eq(interview.id, id), eq(interview.organizationId, orgId)),
-    columns: { id: true, googleCalendarEventId: true, createdById: true },
+    columns: {
+      id: true,
+      status: true,
+      invitationSentAt: true,
+      googleCalendarEventId: true,
+      createdById: true,
+    },
   })
 
   if (!current) {
     throw createError({ statusCode: 404, statusMessage: 'Interview not found' })
+  }
+
+  if (current.invitationSentAt && current.status === 'scheduled') {
+    throw createError({
+      statusCode: 409,
+      statusMessage: 'Cancel this interview before deleting it so the candidate receives a calendar cancellation.',
+    })
   }
 
   // Cancel Google Calendar event (non-blocking)

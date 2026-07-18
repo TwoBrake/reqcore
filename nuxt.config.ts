@@ -113,7 +113,9 @@ export default defineNuxtConfig({
   // PostHog — privacy-focused product analytics & feature flags
   // ─────────────────────────────────────────────
   // Enable source maps so PostHog error tracking can display readable stack traces
-  sourcemap: { client: "hidden" },
+  sourcemap: {
+    client: process.env.NODE_ENV === "production" ? "hidden" : false,
+  },
 
   // @ts-ignore - posthogConfig types only available when @posthog/nuxt module is loaded
   posthogConfig: {

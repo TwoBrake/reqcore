@@ -9,12 +9,13 @@ const interviewStatuses = ['scheduled', 'completed', 'cancelled', 'no_show'] as 
 /** Schema for creating a new interview */
 export const createInterviewSchema = z.object({
   applicationId: z.string().uuid('Invalid application ID'),
-  title: z.string().min(1, 'Title is required').max(200),
+  title: z.string().min(1).max(200).optional(),
   type: z.enum(interviewTypes).default('video'),
   scheduledAt: z.string().datetime({ message: 'Valid ISO 8601 datetime required' }),
   duration: z.number().int().min(5).max(480).default(60),
   location: z.string().max(500).optional(),
   notes: z.string().max(5000).optional(),
+  personalNote: z.string().max(5000).optional(),
   interviewers: z.array(z.string().max(200)).max(20).optional(),
   timezone: z.string().max(100).optional(),
   // Notification preferences
@@ -33,10 +34,12 @@ export const updateInterviewSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   type: z.enum(interviewTypes).optional(),
   status: z.enum(interviewStatuses).optional(),
+  notifyCandidate: z.boolean().optional(),
   scheduledAt: z.string().datetime({ message: 'Valid ISO 8601 datetime required' }).optional(),
   duration: z.number().int().min(5).max(480).optional(),
   location: z.string().max(500).nullish(),
   notes: z.string().max(5000).nullish(),
+  personalNote: z.string().max(5000).nullish(),
   interviewers: z.array(z.string().max(200)).max(20).nullish(),
   timezone: z.string().max(100).optional(),
 }).refine(
@@ -59,5 +62,3 @@ export const interviewQuerySchema = z.object({
 export const interviewIdParamSchema = z.object({
   id: z.string().uuid('Invalid interview ID'),
 })
-
-

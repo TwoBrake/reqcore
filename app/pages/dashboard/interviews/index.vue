@@ -4,7 +4,7 @@ import {
   Building2, Code2, FileText, UsersRound, MoreHorizontal,
   CheckCircle2, XCircle, AlertTriangle, UserRound, Briefcase,
   Pencil, Trash2, MapPin, Users, CalendarDays,
-  Mail, ExternalLink,
+  ExternalLink,
 } from 'lucide-vue-next'
 
 definePageMeta({
@@ -21,6 +21,7 @@ useSeoMeta({
 const { handlePreviewReadOnlyError } = usePreviewReadOnly()
 const toast = useToast()
 const { formatPersonName, formatDateTime } = useOrgSettings()
+const { reportStatus, reportCandidateUpdate } = useInterviewMutationFeedback()
 
 // ─── Filters ──────────────────────────────────────────────────────
 const searchInput = ref('')
@@ -167,7 +168,6 @@ const editingInterview = ref<typeof interviews.value[number] | null>(null)
 const editForm = reactive({
   title: '',
   type: 'video' as string,
-  status: 'scheduled' as string,
   date: '',
   time: '',
   duration: 60,
@@ -177,13 +177,14 @@ const editForm = reactive({
 })
 const editErrors = ref<Record<string, string>>({})
 const isSaving = ref(false)
+const rescheduleOnSave = ref(false)
 
-function openEdit(interviewItem: typeof interviews.value[number]) {
+function openEdit(interviewItem: typeof interviews.value[number], options: { reschedule?: boolean } = {}) {
   editingInterview.value = interviewItem
+  rescheduleOnSave.value = !!options.reschedule
   const d = new Date(interviewItem.scheduledAt)
   editForm.title = interviewItem.title
   editForm.type = interviewItem.type
-  editForm.status = interviewItem.status
   editForm.date = d.toISOString().slice(0, 10)
   editForm.time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
   editForm.duration = interviewItem.duration
@@ -194,9 +195,14 @@ function openEdit(interviewItem: typeof interviews.value[number]) {
   showEditModal.value = true
 }
 
+function openRescheduleEdit(interviewItem: typeof interviews.value[number]) {
+  openEdit(interviewItem, { reschedule: true })
+}
+
 function cancelEdit() {
   showEditModal.value = false
   editingInterview.value = null
+  rescheduleOnSave.value = false
   editErrors.value = {}
 }
 
@@ -213,18 +219,26 @@ async function handleSaveEdit() {
 
   isSaving.value = true
   try {
-    await updateInterview(editingInterview.value!.id, {
+    const current = editingInterview.value!
+    const result = await updateInterview(current.id, {
       title: editForm.title.trim(),
       type: editForm.type as any,
-      status: editForm.status as any,
+      ...(rescheduleOnSave.value ? { status: 'scheduled' as const } : {}),
       scheduledAt,
       duration: editForm.duration,
       location: editForm.location.trim() || null,
       notes: editForm.notes.trim() || null,
       interviewers: filteredInterviewers.length > 0 ? filteredInterviewers : null,
     })
+    if (rescheduleOnSave.value) {
+      reportCandidateUpdate(result, current.candidateEmail, 'Interview rescheduled')
+    }
+    else if (result.notification.intent) {
+      reportCandidateUpdate(result, current.candidateEmail)
+    }
     showEditModal.value = false
     editingInterview.value = null
+    rescheduleOnSave.value = false
   } catch (err: any) {
     if (handlePreviewReadOnlyError(err)) return
     editErrors.value.submit = err?.data?.statusMessage ?? 'Failed to update interview'
@@ -265,13 +279,33 @@ function getAllowedTransitions(status: string): InterviewStatus[] {
   return (INTERVIEW_STATUS_TRANSITIONS[status] ?? []) as InterviewStatus[]
 }
 
+const isChangingStatus = ref(false)
+
 async function quickStatusChange(interviewItem: typeof interviews.value[number], newStatus: InterviewStatus) {
+  isChangingStatus.value = true
   try {
-    await updateInterview(interviewItem.id, { status: newStatus })
+    const result = await updateInterview(interviewItem.id, { status: newStatus })
+    pendingStatusAction.value = null
+    reportStatus(newStatus, result, interviewItem.candidateEmail)
   } catch (err: any) {
     if (handlePreviewReadOnlyError(err)) return
     toast.error('Failed to update status', { message: err?.data?.statusMessage, statusCode: err?.data?.statusCode })
+  } finally {
+    isChangingStatus.value = false
   }
+}
+
+const pendingStatusAction = ref<{
+  interview: typeof interviews.value[number]
+  status: Exclude<InterviewStatus, 'scheduled'>
+} | null>(null)
+
+function requestStatusChange(interviewItem: typeof interviews.value[number], newStatus: InterviewStatus) {
+  if (newStatus === 'scheduled') {
+    openRescheduleEdit(interviewItem)
+    return
+  }
+  pendingStatusAction.value = { interview: interviewItem, status: newStatus }
 }
 
 // ─── More menu (per-row) ─────────────────────────────────────────
@@ -363,13 +397,6 @@ const statusCounts = computed(() => {
         </button>
       </div>
 
-      <NuxtLink
-        :to="$localePath('/dashboard/interviews/templates')"
-        class="inline-flex items-center gap-1.5 rounded-lg border border-surface-200 dark:border-surface-700/80 bg-white dark:bg-surface-900 px-3 py-2 text-xs font-medium text-surface-600 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 transition-colors no-underline"
-      >
-        <Mail class="size-3.5" />
-        Email Templates
-      </NuxtLink>
     </div>
 
     <!-- Loading state -->
@@ -475,6 +502,13 @@ const statusCounts = computed(() => {
                   </span>
                 </div>
 
+                <div class="mt-2">
+                  <InterviewCandidateResponse
+                    :response="interviewItem.candidateResponse"
+                    :responded-at="interviewItem.candidateRespondedAt"
+                  />
+                </div>
+
                 <!-- Schedule details -->
                 <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-surface-400 dark:text-surface-500">
                   <TimelineDateLink :date="interviewItem.scheduledAt" class="inline-flex items-center gap-1 font-medium" :class="isUpcoming(interviewItem.scheduledAt) ? 'text-brand-600 dark:text-brand-400' : ''">
@@ -559,10 +593,14 @@ const statusCounts = computed(() => {
                     <template v-for="nextStatus in getAllowedTransitions(interviewItem.status)" :key="nextStatus">
                       <button
                         class="flex w-full cursor-pointer items-center gap-2.5 px-3.5 py-2 text-sm text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800/80 transition-colors"
-                        @click="quickStatusChange(interviewItem, nextStatus); openMenuId = null"
+                        @click="requestStatusChange(interviewItem, nextStatus); openMenuId = null"
                       >
                         <component :is="statusConfig[nextStatus]?.icon || Calendar" class="size-3.5 text-surface-400" />
-                        Mark as {{ statusConfig[nextStatus]?.label }}
+                        {{ nextStatus === 'scheduled'
+                          ? 'Reschedule…'
+                          : nextStatus === 'cancelled' && interviewItem.invitationSentAt
+                            ? 'Cancel and notify candidate'
+                            : `Mark as ${statusConfig[nextStatus]?.label}` }}
                       </button>
                     </template>
                     <div class="border-t border-surface-100 dark:border-surface-800 my-1.5 mx-2" />
@@ -624,6 +662,10 @@ const statusCounts = computed(() => {
                     >
                       {{ statusConfig[interviewItem.status]?.label }}
                     </span>
+                    <InterviewCandidateResponse
+                      :response="interviewItem.candidateResponse"
+                      :responded-at="interviewItem.candidateRespondedAt"
+                    />
                   </div>
                   <p class="mt-1 text-sm font-medium">
                     <NuxtLink
@@ -698,7 +740,7 @@ const statusCounts = computed(() => {
       <div v-if="showEditModal" class="fixed inset-0 z-50 flex items-center justify-center">
         <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="cancelEdit" />
         <div class="relative bg-white dark:bg-surface-900 rounded-2xl shadow-2xl shadow-surface-900/10 dark:shadow-black/30 ring-1 ring-surface-200/80 dark:ring-surface-700/60 p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
-          <h3 class="text-lg font-semibold text-surface-900 dark:text-surface-100 mb-5">Edit Interview</h3>
+          <h3 class="text-lg font-semibold text-surface-900 dark:text-surface-100 mb-5">{{ rescheduleOnSave ? 'Reschedule Interview' : 'Edit Interview' }}</h3>
 
           <div v-if="editErrors.submit" class="mb-4 rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700 dark:border-danger-800 dark:bg-danger-950/40 dark:text-danger-300">
             {{ editErrors.submit }}
@@ -719,7 +761,7 @@ const statusCounts = computed(() => {
               <p v-if="editErrors.title" class="mt-1 text-xs text-danger-600">{{ editErrors.title }}</p>
             </div>
 
-            <div class="grid grid-cols-2 gap-4">
+            <div>
               <div>
                 <label for="edit-interview-type" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Type</label>
                 <select
@@ -733,16 +775,6 @@ const statusCounts = computed(() => {
                   <option value="technical">Technical</option>
                   <option value="panel">Panel</option>
                   <option value="take_home">Take Home</option>
-                </select>
-              </div>
-              <div>
-                <label for="edit-interview-status" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Status</label>
-                <select
-                  id="edit-interview-status"
-                  v-model="editForm.status"
-                  class="w-full rounded-lg border border-surface-300 dark:border-surface-700 px-3 py-2 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-colors"
-                >
-                  <option v-for="s in STATUS_OPTIONS" :key="s" :value="s">{{ statusConfig[s]?.label }}</option>
                 </select>
               </div>
             </div>
@@ -803,6 +835,9 @@ const statusCounts = computed(() => {
             </div>
 
             <div class="flex items-center justify-end gap-3 pt-2">
+              <p v-if="editingInterview?.invitationSentAt" class="mr-auto max-w-xs text-xs leading-5 text-surface-500 dark:text-surface-400">
+                Candidate-facing changes send an update to {{ editingInterview.candidateEmail }}.
+              </p>
               <button
                 type="button"
                 class="cursor-pointer rounded-lg border border-surface-300 dark:border-surface-700 px-4 py-2 text-sm font-medium text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 transition-colors"
@@ -815,7 +850,7 @@ const statusCounts = computed(() => {
                 :disabled="isSaving"
                 class="cursor-pointer rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                {{ isSaving ? 'Saving…' : 'Save Changes' }}
+                {{ isSaving ? 'Saving…' : rescheduleOnSave ? 'Reschedule and send' : 'Save Changes' }}
               </button>
             </div>
           </form>
@@ -830,7 +865,7 @@ const statusCounts = computed(() => {
         <div class="relative bg-white dark:bg-surface-900 rounded-2xl shadow-2xl shadow-surface-900/10 dark:shadow-black/30 ring-1 ring-surface-200/80 dark:ring-surface-700/60 p-6 max-w-sm w-full mx-4">
           <h3 class="text-lg font-semibold text-surface-900 dark:text-surface-100 mb-2">Delete Interview</h3>
           <p class="text-sm text-surface-600 dark:text-surface-400 mb-4">
-            Are you sure you want to delete <strong>{{ deletingInterview?.title }}</strong>? This action cannot be undone.
+            Delete <strong>{{ deletingInterview?.title }}</strong> from Reqcore? Deleting does not message the candidate and cannot be undone.
           </p>
           <div class="flex justify-end gap-2">
             <button
@@ -851,5 +886,16 @@ const statusCounts = computed(() => {
         </div>
       </div>
     </Teleport>
+
+    <InterviewStatusActionDialog
+      :open="!!pendingStatusAction"
+      :action="pendingStatusAction?.status ?? null"
+      :candidate-name="pendingStatusAction ? formatPersonName(pendingStatusAction.interview.candidateFirstName, pendingStatusAction.interview.candidateLastName) : ''"
+      :candidate-email="pendingStatusAction?.interview.candidateEmail ?? ''"
+      :invitation-sent-at="pendingStatusAction?.interview.invitationSentAt ?? null"
+      :loading="isChangingStatus"
+      @close="pendingStatusAction = null"
+      @confirm="pendingStatusAction && quickStatusChange(pendingStatusAction.interview, pendingStatusAction.status)"
+    />
   </div>
 </template>

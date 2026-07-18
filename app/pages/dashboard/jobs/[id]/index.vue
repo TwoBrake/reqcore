@@ -7,9 +7,10 @@ import {
   CheckCircle2, XCircle, AlertTriangle, ArrowUpDown, ListFilter,
   Maximize2, Minimize2, Brain, History, SlidersHorizontal,
   ChevronLeft, ChevronRight, UnfoldHorizontal, FoldHorizontal,
-  StickyNote, MoreHorizontal,
+  StickyNote, MoreHorizontal, Inbox,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
+import type { Interview, InterviewMutationResult } from '~/composables/useInterviews'
 import type { PropertyEntry, PropertyFilter } from '~~/shared/properties'
 import { usePreviewReadOnly } from '~/composables/usePreviewReadOnly'
 import { APPLICATION_STATUS_TRANSITIONS, INTERVIEW_STATUS_TRANSITIONS } from '~~/shared/status-transitions'
@@ -26,6 +27,7 @@ const { handlePreviewReadOnlyError } = usePreviewReadOnly()
 const { track } = useTrack()
 const toast = useToast()
 const { formatPersonName } = useOrgSettings()
+const { reportStatus, reportCandidateUpdate } = useInterviewMutationFeedback()
 
 // ─────────────────────────────────────────────
 // Job data (with update/delete support)
@@ -245,7 +247,7 @@ watch(currentIndex, () => {
 })
 
 // Detail tab for center panel
-type DetailTab = 'overview' | 'cover-letter' | 'interviews' | 'documents' | 'responses' | 'ai-analysis' | 'timeline' | 'properties' | 'notes'
+type DetailTab = 'overview' | 'inbox' | 'cover-letter' | 'interviews' | 'documents' | 'responses' | 'ai-analysis' | 'timeline' | 'properties' | 'notes'
 const detailTab = ref<DetailTab>('overview')
 
 // Overview section visibility toggles
@@ -810,9 +812,11 @@ const isMutating = ref(false)
 
 const showInterviewSidebar = ref(false)
 const interviewTargetApplication = ref<{ id: string; name: string } | null>(null)
+const interviewToReschedule = ref<Interview | null>(null)
 
 function openInterviewScheduler() {
   if (!currentSummary.value) return
+  interviewToReschedule.value = null
   interviewTargetApplication.value = {
     id: currentSummary.value.id,
     name: `${currentSummary.value.candidateFirstName} ${currentSummary.value.candidateLastName}`,
@@ -820,23 +824,33 @@ function openInterviewScheduler() {
   showInterviewSidebar.value = true
 }
 
+function closeInterviewSidebar() {
+  showInterviewSidebar.value = false
+  interviewTargetApplication.value = null
+  interviewToReschedule.value = null
+}
+
 async function handleInterviewScheduled() {
+  const wasRescheduled = !!interviewToReschedule.value
   showInterviewSidebar.value = false
   const scheduledApplicationId = interviewTargetApplication.value?.id ?? currentSummary.value?.id
   interviewTargetApplication.value = null
+  interviewToReschedule.value = null
 
-  track('interview_scheduled')
+  track(wasRescheduled ? 'interview_rescheduled' : 'interview_scheduled')
 
-  // Refresh the interviews list
   await refreshJobInterviews()
 
-  // Transition the application status to 'interview' after scheduling
+  if (wasRescheduled) return
+
+  // Scheduling moves the candidate into the interview stage server-side. Refresh
+  // the pipeline to reflect that, and when the transition applies, follow the
+  // candidate to the interview column so the user sees the scheduled interview.
   if (currentSummary.value && currentSummary.value.status !== 'interview') {
     const allowed = APPLICATION_STATUS_TRANSITIONS[currentSummary.value.status] ?? []
     if (allowed.includes('interview')) {
-      await changeStatus('interview')
+      await refreshApps()
 
-      // Follow the candidate to the interview column so the user sees the scheduled interview
       if (scheduledApplicationId) {
         focusStatus.value = 'interview'
         await nextTick()
@@ -958,25 +972,13 @@ const interviewEditErrors = ref<Record<string, string>>({})
 const isInterviewSaving = ref(false)
 const isInterviewTransitioning = ref(false)
 
-// Reschedule state
-const rescheduleInterviewId = ref<string | null>(null)
-const rescheduleForm = reactive({
-  date: '',
-  time: '',
-  duration: 60,
-})
-const isRescheduling = ref(false)
-const rescheduleError = ref('')
-
 function toggleInterviewExpand(id: string) {
   if (expandedInterviewId.value === id) {
     expandedInterviewId.value = null
     editingInterviewId.value = null
-    rescheduleInterviewId.value = null
   } else {
     expandedInterviewId.value = id
     editingInterviewId.value = null
-    rescheduleInterviewId.value = null
   }
 }
 
@@ -1012,8 +1014,9 @@ async function saveInterviewEdit() {
 
   isInterviewSaving.value = true
   try {
+    const current = jobInterviews.value.find(item => item.id === editingInterviewId.value)
     const filteredInterviewers = interviewEditForm.interviewers.filter(i => i.trim())
-    await $fetch(`/api/interviews/${editingInterviewId.value}`, {
+    const result = await $fetch<InterviewMutationResult>(`/api/interviews/${editingInterviewId.value}`, {
       method: 'PATCH',
       body: {
         title: interviewEditForm.title.trim(),
@@ -1023,6 +1026,9 @@ async function saveInterviewEdit() {
         interviewers: filteredInterviewers.length > 0 ? filteredInterviewers : null,
       },
     })
+    if (current && result.notification.intent) {
+      reportCandidateUpdate(result, current.candidateEmail)
+    }
     editingInterviewId.value = null
     await refreshJobInterviews()
   } catch (err: any) {
@@ -1033,13 +1039,28 @@ async function saveInterviewEdit() {
   }
 }
 
-async function handleInterviewTransition(interviewId: string, newStatus: InterviewStatus) {
+const pendingInterviewStatus = ref<{
+  interview: Interview
+  status: Exclude<InterviewStatus, 'scheduled'>
+} | null>(null)
+
+function requestInterviewTransition(iv: Interview, newStatus: InterviewStatus) {
+  if (newStatus === 'scheduled') {
+    openReschedule(iv)
+    return
+  }
+  pendingInterviewStatus.value = { interview: iv, status: newStatus }
+}
+
+async function handleInterviewTransition(iv: Interview, newStatus: InterviewStatus) {
   isInterviewTransitioning.value = true
   try {
-    await $fetch(`/api/interviews/${interviewId}`, {
+    const result = await $fetch<InterviewMutationResult>(`/api/interviews/${iv.id}`, {
       method: 'PATCH',
       body: { status: newStatus },
     })
+    pendingInterviewStatus.value = null
+    reportStatus(newStatus, result, iv.candidateEmail)
     await refreshJobInterviews()
   } catch (err: any) {
     if (handlePreviewReadOnlyError(err)) return
@@ -1050,45 +1071,12 @@ async function handleInterviewTransition(interviewId: string, newStatus: Intervi
 }
 
 function openReschedule(iv: Interview) {
-  rescheduleInterviewId.value = iv.id
-  const d = new Date(iv.scheduledAt)
-  rescheduleForm.date = d.toISOString().slice(0, 10)
-  rescheduleForm.time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  rescheduleForm.duration = iv.duration
-  rescheduleError.value = ''
-}
-
-function cancelReschedule() {
-  rescheduleInterviewId.value = null
-  rescheduleError.value = ''
-}
-
-async function handleReschedule() {
-  rescheduleError.value = ''
-  if (!rescheduleForm.date || !rescheduleForm.time) {
-    rescheduleError.value = 'Date and time are required'
-    return
+  interviewToReschedule.value = iv
+  interviewTargetApplication.value = {
+    id: iv.applicationId,
+    name: formatPersonName(iv.candidateFirstName, iv.candidateLastName),
   }
-
-  isRescheduling.value = true
-  try {
-    const scheduledAt = new Date(`${rescheduleForm.date}T${rescheduleForm.time}`).toISOString()
-    await $fetch(`/api/interviews/${rescheduleInterviewId.value}`, {
-      method: 'PATCH',
-      body: {
-        scheduledAt,
-        duration: rescheduleForm.duration,
-        status: 'scheduled',
-      },
-    })
-    rescheduleInterviewId.value = null
-    await refreshJobInterviews()
-  } catch (err: any) {
-    if (handlePreviewReadOnlyError(err)) return
-    rescheduleError.value = err?.data?.statusMessage ?? 'Failed to reschedule'
-  } finally {
-    isRescheduling.value = false
-  }
+  showInterviewSidebar.value = true
 }
 
 async function changeStatus(status: string) {
@@ -1197,6 +1185,7 @@ interface DetailTabDef {
 
 const detailTabDefs = computed<DetailTabDef[]>(() => {
   const defs: DetailTabDef[] = []
+  defs.push({ key: 'inbox', label: 'Inbox', icon: Inbox })
   if (hasCoverLetter.value) {
     defs.push({ key: 'cover-letter', label: 'Cover Letter', icon: FileText })
   }
@@ -1794,10 +1783,14 @@ function closeDocPreview() {
             </div>
 
             <!-- Scrollable container: header + tabs + content -->
-            <div ref="detailScrollContainer" class="flex-1 overflow-y-auto scrollbar-thin pb-20 md:pb-0">
+            <div
+              ref="detailScrollContainer"
+              class="min-h-0 flex-1 scrollbar-thin pb-20 md:pb-0"
+              :class="detailTab === 'inbox' ? 'flex flex-col overflow-hidden' : 'overflow-y-auto'"
+            >
 
             <!-- Candidate header -->
-            <div class="border-b border-surface-200 bg-surface-50 px-4 sm:px-6 py-3 sm:py-4 dark:border-surface-800 dark:bg-surface-900/80">
+            <div class="shrink-0 border-b border-surface-200 bg-surface-50 px-4 sm:px-6 py-3 sm:py-4 dark:border-surface-800 dark:bg-surface-900/80">
               <div class="mx-auto" :class="detailWidthClass">
                 <div class="flex items-start gap-4">
                   <div class="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-400 to-brand-600 text-lg font-bold text-white shadow-lg shadow-brand-500/20 dark:from-brand-500 dark:to-brand-700 dark:shadow-brand-500/10">
@@ -1899,7 +1892,7 @@ function closeDocPreview() {
             </div>
 
             <!-- Detail tabs -->
-            <div class="border-b border-surface-200/80 bg-white px-4 sm:px-6 py-1 dark:border-surface-800/60 dark:bg-surface-900">
+            <div class="shrink-0 border-b border-surface-200/80 bg-white px-4 sm:px-6 py-1 dark:border-surface-800/60 dark:bg-surface-900">
               <div ref="tabBar" class="relative mx-auto flex items-center gap-0.5 whitespace-nowrap" :class="detailWidthClass">
                 <div ref="overviewDropdownRef" class="relative shrink-0">
                   <div class="flex items-center rounded-md transition-colors duration-150" :class="detailTab === 'overview'
@@ -2065,7 +2058,10 @@ function closeDocPreview() {
             </div>
 
             <!-- Detail content -->
-            <div class="bg-surface-50/80 dark:bg-surface-950/80 px-4 sm:px-6 py-5 sm:py-8">
+            <div
+              class="bg-surface-50/80 px-4 dark:bg-surface-950/80 sm:px-6"
+              :class="detailTab === 'inbox' ? 'flex min-h-0 flex-1 flex-col overflow-hidden py-4 sm:py-5' : 'py-5 sm:py-8'"
+            >
               <div v-if="!resolvedCurrentApplication || showDetailSkeleton" class="space-y-5 mx-auto animate-pulse" :class="detailWidthClass" aria-label="Loading candidate details">
                 <div class="h-28 rounded-xl border border-surface-200/80 bg-white dark:border-surface-800/60 dark:bg-surface-900" />
                 <div class="h-40 rounded-xl border border-surface-200/80 bg-white dark:border-surface-800/60 dark:bg-surface-900" />
@@ -2075,6 +2071,17 @@ function closeDocPreview() {
               <template v-else>
 
 
+
+              <!-- CANDIDATE INBOX -->
+              <div v-if="detailTab === 'inbox'" class="mx-auto h-full min-h-0 min-w-0 w-full" :class="detailWidthClass">
+                <CandidateMessagingPanel
+                  :key="currentSummary.id"
+                  :application-id="currentSummary.id"
+                  :candidate-name="formatPersonName(currentSummary.candidateFirstName, currentSummary.candidateLastName)"
+                  :candidate-email="currentSummary.candidateEmail"
+                  :job-title="jobData?.title ?? ''"
+                />
+              </div>
 
               <!-- COVER LETTER SECTION -->
               <div v-if="showSection.coverLetter && hasCoverLetter" class="mx-auto" :class="[detailWidthClass, detailTab === 'overview' ? 'mt-5' : '']">
@@ -2189,64 +2196,20 @@ function closeDocPreview() {
                             :disabled="isInterviewTransitioning"
                             class="cursor-pointer rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
                             :class="interviewTransitionClasses[nextStatus]"
-                            @click.stop="nextStatus === 'scheduled' ? openReschedule(iv) : handleInterviewTransition(iv.id, nextStatus)"
+                            @click.stop="requestInterviewTransition(iv, nextStatus)"
                           >
-                            {{ interviewTransitionLabels[nextStatus] }}
-                          </button>
-                        </div>
-                      </div>
-
-                      <!-- Reschedule form (inline) -->
-                      <div v-if="rescheduleInterviewId === iv.id" class="px-5 py-4 border-t border-surface-100 dark:border-surface-800/60">
-                        <h4 class="text-xs font-semibold text-surface-700 dark:text-surface-300 mb-3 flex items-center gap-1.5">
-                          <Calendar class="size-3.5" />
-                          Reschedule Interview
-                        </h4>
-                        <div class="grid grid-cols-3 gap-3">
-                          <div>
-                            <label class="block text-[11px] font-medium text-surface-500 dark:text-surface-400 mb-1">Date</label>
-                            <input
-                              v-model="rescheduleForm.date"
-                              type="date"
-                              class="w-full rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 px-2.5 py-1.5 text-sm text-surface-900 dark:text-surface-100 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-                              @click.stop
-                            />
-                          </div>
-                          <div>
-                            <label class="block text-[11px] font-medium text-surface-500 dark:text-surface-400 mb-1">Time</label>
-                            <input
-                              v-model="rescheduleForm.time"
-                              type="time"
-                              class="w-full rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 px-2.5 py-1.5 text-sm text-surface-900 dark:text-surface-100 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-                              @click.stop
-                            />
-                          </div>
-                          <div>
-                            <label class="block text-[11px] font-medium text-surface-500 dark:text-surface-400 mb-1">Duration (min)</label>
-                            <input
-                              v-model.number="rescheduleForm.duration"
-                              type="number"
-                              min="5"
-                              max="480"
-                              class="w-full rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 px-2.5 py-1.5 text-sm text-surface-900 dark:text-surface-100 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-                              @click.stop
-                            />
-                          </div>
-                        </div>
-                        <p v-if="rescheduleError" class="mt-2 text-xs text-danger-600 dark:text-danger-400">{{ rescheduleError }}</p>
-                        <div class="flex items-center justify-end gap-2 mt-3">
-                          <button
-                            class="cursor-pointer rounded-lg border border-surface-300 dark:border-surface-700 px-3 py-1.5 text-xs font-medium text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 transition-colors"
-                            @click.stop="cancelReschedule"
-                          >
-                            Cancel
+                            {{ nextStatus === 'cancelled' && iv.invitationSentAt
+                              ? 'Cancel & notify'
+                              : interviewTransitionLabels[nextStatus] }}
                           </button>
                           <button
-                            :disabled="isRescheduling"
-                            class="cursor-pointer rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                            @click.stop="handleReschedule"
+                            v-if="iv.status === 'scheduled'"
+                            type="button"
+                            class="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-brand-300 px-2.5 py-1 text-[11px] font-semibold text-brand-700 transition-colors hover:bg-brand-50 dark:border-brand-700 dark:text-brand-300 dark:hover:bg-brand-950/30"
+                            @click.stop="openReschedule(iv)"
                           >
-                            {{ isRescheduling ? 'Saving…' : 'Reschedule' }}
+                            <Calendar class="size-3" />
+                            Reschedule & notify
                           </button>
                         </div>
                       </div>
@@ -2419,6 +2382,10 @@ function closeDocPreview() {
                             </div>
 
                             <p v-if="interviewEditErrors.submit" class="text-xs text-danger-600 dark:text-danger-400">{{ interviewEditErrors.submit }}</p>
+
+                            <p v-if="iv.invitationSentAt && iv.status === 'scheduled'" class="text-xs leading-5 text-surface-500 dark:text-surface-400">
+                              Candidate-facing changes send an update to {{ iv.candidateEmail }}.
+                            </p>
 
                             <div class="flex items-center justify-end gap-2 pt-2">
                               <button
@@ -2916,9 +2883,21 @@ function closeDocPreview() {
       :application-id="interviewTargetApplication.id"
       :candidate-name="interviewTargetApplication.name"
       :job-title="jobData?.title ?? ''"
+      :interview="interviewToReschedule"
       :teleport-target="teleportTarget"
-      @close="showInterviewSidebar = false"
+      @close="closeInterviewSidebar"
       @scheduled="handleInterviewScheduled"
+    />
+
+    <InterviewStatusActionDialog
+      :open="!!pendingInterviewStatus"
+      :action="pendingInterviewStatus?.status ?? null"
+      :candidate-name="pendingInterviewStatus ? formatPersonName(pendingInterviewStatus.interview.candidateFirstName, pendingInterviewStatus.interview.candidateLastName) : ''"
+      :candidate-email="pendingInterviewStatus?.interview.candidateEmail ?? ''"
+      :invitation-sent-at="pendingInterviewStatus?.interview.invitationSentAt ?? null"
+      :loading="isInterviewTransitioning"
+      @close="pendingInterviewStatus = null"
+      @confirm="pendingInterviewStatus && handleInterviewTransition(pendingInterviewStatus.interview, pendingInterviewStatus.status)"
     />
 
     <!-- Document Preview Modal -->

@@ -1,8 +1,13 @@
 import { and, eq } from 'drizzle-orm'
-import { interview, application } from '../../../database/schema'
+import { interview } from '../../../database/schema'
 import { interviewIdParamSchema, updateInterviewSchema } from '../../../utils/schemas/interview'
 import { INTERVIEW_STATUS_TRANSITIONS } from '~~/shared/status-transitions'
 import { updateCalendarEvent, cancelCalendarEvent } from '../../../utils/google-calendar'
+import { sendInterviewConversationMessage } from '../../../utils/interview-conversation'
+import {
+  candidateFacingInterviewChanged,
+  interviewNotificationIntent,
+} from '../../../utils/interview-notification'
 
 export default defineEventHandler(async (event) => {
   const session = await requirePermission(event, { interview: ['update'] })
@@ -14,7 +19,28 @@ export default defineEventHandler(async (event) => {
   // Fetch current interview for validation
   const current = await db.query.interview.findFirst({
     where: and(eq(interview.id, id), eq(interview.organizationId, orgId)),
-    columns: { id: true, status: true, googleCalendarEventId: true, createdById: true, timezone: true },
+    columns: {
+      id: true,
+      status: true,
+      title: true,
+      type: true,
+      scheduledAt: true,
+      duration: true,
+      location: true,
+      interviewers: true,
+      timezone: true,
+      personalNote: true,
+      invitationSentAt: true,
+      googleCalendarEventId: true,
+      createdById: true,
+    },
+    with: {
+      application: {
+        with: {
+          candidate: { columns: { quarantinedAt: true } },
+        },
+      },
+    },
   })
 
   if (!current) {
@@ -32,6 +58,19 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  const proposalFieldsChanged = candidateFacingInterviewChanged(current, body)
+  const notificationIntent = interviewNotificationIntent({
+    current,
+    patch: body,
+    candidateFacingChanged: proposalFieldsChanged,
+    notifyCandidate: body.notifyCandidate,
+  })
+  const tier = notificationIntent
+    ? await assertPlanFeature(orgId, 'candidateMessaging')
+    : null
+  if (notificationIntent && current.application.candidate.quarantinedAt) {
+    throw createError({ statusCode: 409, statusMessage: 'Restore this candidate before sending an interview update' })
+  }
   const updateData: Record<string, unknown> = { updatedAt: new Date() }
   if (body.title !== undefined) updateData.title = body.title
   if (body.type !== undefined) updateData.type = body.type
@@ -40,8 +79,14 @@ export default defineEventHandler(async (event) => {
   if (body.duration !== undefined) updateData.duration = body.duration
   if (body.location !== undefined) updateData.location = body.location
   if (body.notes !== undefined) updateData.notes = body.notes
+  if (body.personalNote !== undefined) updateData.personalNote = body.personalNote
   if (body.interviewers !== undefined) updateData.interviewers = body.interviewers
   if (body.timezone !== undefined) updateData.timezone = body.timezone
+  const returningToSchedule = body.status === 'scheduled' && current.status !== 'scheduled'
+  if (current.invitationSentAt && (proposalFieldsChanged || returningToSchedule) && (body.status ?? current.status) === 'scheduled') {
+    updateData.candidateResponse = 'pending'
+    updateData.candidateRespondedAt = null
+  }
 
   const [updated] = await db
     .update(interview)
@@ -62,19 +107,6 @@ export default defineEventHandler(async (event) => {
       })
     }
     else {
-      // Fetch candidate info for attendee update
-      const interviewWithApp = await db.query.interview.findFirst({
-        where: eq(interview.id, id),
-        with: {
-          application: {
-            with: {
-              candidate: { columns: { email: true, firstName: true, lastName: true } },
-            },
-          },
-        },
-      })
-
-      const candidate = interviewWithApp?.application?.candidate
       updateCalendarEvent(current.createdById, current.googleCalendarEventId, {
         ...(body.title ? { title: body.title } : {}),
         ...(body.scheduledAt ? {
@@ -83,11 +115,7 @@ export default defineEventHandler(async (event) => {
           timezone: body.timezone ?? current.timezone ?? 'UTC',
         } : {}),
         ...(body.location !== undefined ? { location: body.location } : {}),
-        ...(candidate ? {
-          candidateEmail: candidate.email,
-          candidateName: `${candidate.firstName} ${candidate.lastName}`,
-        } : {}),
-        ...(body.interviewers ? { interviewerEmails: body.interviewers } : {}),
+        ...(body.interviewers !== undefined ? { interviewerEmails: body.interviewers ?? [] } : {}),
       }).then(async (htmlLink) => {
         if (htmlLink) {
           await db.update(interview)
@@ -103,6 +131,17 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  const delivery = notificationIntent
+    ? await sendInterviewConversationMessage({
+        interviewId: id,
+        organizationId: orgId,
+        sender: session.user,
+        tier: tier!,
+        // Active interview updates remain deliverable after a Free limit is reached.
+        bypassAllowance: notificationIntent !== 'proposal',
+      })
+    : null
+
   recordActivity({
     organizationId: orgId,
     actorId: session.user.id,
@@ -113,8 +152,25 @@ export default defineEventHandler(async (event) => {
       ...(body.status && body.status !== current.status
         ? { from: current.status, to: body.status }
         : {}),
+      notificationIntent,
+      notificationStatus: delivery?.messageStatus ?? 'not_required',
+      messageId: delivery?.messageId ?? null,
     },
   })
 
-  return updated
+  return {
+    ...updated,
+    delivery,
+    notification: {
+      intent: notificationIntent,
+      attempted: !!delivery,
+      status: delivery?.messageStatus ?? 'not_required',
+      messageId: delivery?.messageId ?? null,
+      reason: !current.invitationSentAt && body.status === 'cancelled'
+        ? 'no_prior_invitation'
+        : notificationIntent
+          ? null
+          : 'internal_status_only',
+    },
+  }
 })

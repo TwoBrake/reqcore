@@ -27,6 +27,9 @@ import { and, eq, inArray, isNotNull, isNull, lte, or } from 'drizzle-orm'
 import {
   candidate,
   application,
+  candidateConversation,
+  candidateMessage,
+  candidateMessageAttachment,
   document,
   interview,
   propertyValue,
@@ -182,6 +185,33 @@ async function eraseOne(
     columns: { id: true },
   })
   const applicationIds = applications.map(row => row.id)
+  const conversationIds = applicationIds.length > 0
+    ? (await db.query.candidateConversation.findMany({
+        where: and(
+          eq(candidateConversation.organizationId, orgId),
+          inArray(candidateConversation.applicationId, applicationIds),
+        ),
+        columns: { id: true },
+      })).map(row => row.id)
+    : []
+  const messageIds = conversationIds.length > 0
+    ? (await db.query.candidateMessage.findMany({
+        where: and(
+          eq(candidateMessage.organizationId, orgId),
+          inArray(candidateMessage.conversationId, conversationIds),
+        ),
+        columns: { id: true },
+      })).map(row => row.id)
+    : []
+  const messageAttachments = messageIds.length > 0
+    ? await db.query.candidateMessageAttachment.findMany({
+        where: and(
+          eq(candidateMessageAttachment.organizationId, orgId),
+          inArray(candidateMessageAttachment.messageId, messageIds),
+        ),
+        columns: { storageKey: true },
+      })
+    : []
   const interviews = applicationIds.length > 0
     ? await db.query.interview.findMany({
         where: and(
@@ -244,9 +274,9 @@ async function eraseOne(
 
   // ── Step 1: delete S3 objects first ──
   let s3Failures = 0
-  for (const doc of docs) {
+  for (const storedFile of [...docs, ...messageAttachments]) {
     try {
-      await deleteFromS3(doc.storageKey)
+      await deleteFromS3(storedFile.storageKey)
     }
     catch (err) {
       s3Failures++

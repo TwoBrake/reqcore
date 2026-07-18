@@ -7,13 +7,14 @@
  * Purely presentational — usage comes from /api/billing/status; the upgrade
  * itself is handled by the parent so checkout state stays in one place.
  */
-import { ArrowRight, Briefcase, Sparkles, Zap } from 'lucide-vue-next'
+import { ArrowRight, Briefcase, MessageSquare, Sparkles, Zap } from 'lucide-vue-next'
 import { getBillingPlan } from '~~/shared/billing'
 import type { UsageMeter } from '~/composables/useBillingStatus'
 
 defineProps<{
   activeRoles: UsageMeter
   aiAnalysis: UsageMeter
+  candidateConversations: UsageMeter
   /** Disables the upgrade button for members who can't change billing. */
   canManage?: boolean
   /** Set while a checkout request is in flight. */
@@ -90,6 +91,17 @@ const recommended = getBillingPlan('solo')!
             </p>
             <p v-else class="mt-1.5 text-xs text-surface-400 dark:text-surface-500">
               Free orgs get {{ aiAnalysis.limit }} platform-paid AI runs. Paid plans are unlimited.
+            </p>
+          </template>
+        </UsageMeterBar>
+
+        <UsageMeterBar label="Candidate conversations" :icon="MessageSquare" :used="candidateConversations.used" :limit="candidateConversations.limit">
+          <template #default="{ tone }">
+            <p v-if="tone === 'full'" class="mt-1.5 text-xs text-danger-600 dark:text-danger-400">
+              You've started all your free conversations. Existing threads keep unlimited replies — upgrade to reach more candidates.
+            </p>
+            <p v-else class="mt-1.5 text-xs text-surface-400 dark:text-surface-500">
+              Free orgs can start {{ candidateConversations.limit }} candidate conversations. Paid plans are unlimited.
             </p>
           </template>
         </UsageMeterBar>

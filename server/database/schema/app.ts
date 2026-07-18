@@ -36,6 +36,10 @@ export const genderEnum = pgEnum('gender', ['male', 'female', 'other', 'prefer_n
 export const experienceLevelEnum = pgEnum('experience_level', ['junior', 'mid', 'senior', 'lead'])
 export const nameDisplayFormatEnum = pgEnum('name_display_format', ['first_last', 'last_first'])
 export const dateFormatEnum = pgEnum('date_format', ['mdy', 'dmy', 'ymd'])
+export const candidateMessageDirectionEnum = pgEnum('candidate_message_direction', ['inbound', 'outbound'])
+export const candidateMessageStatusEnum = pgEnum('candidate_message_status', [
+  'queued', 'sent', 'delivered', 'delayed', 'bounced', 'failed', 'complained',
+])
 
 // ─────────────────────────────────────────────
 // ATS Domain Tables — ALL scoped by organizationId
@@ -500,6 +504,8 @@ export const interview = pgTable('interview', {
   duration: integer('duration').notNull().default(60),
   location: text('location'),
   notes: text('notes'),
+  /** Optional recruiter-written note included in candidate-facing proposals. */
+  personalNote: text('personal_note'),
   interviewers: jsonb('interviewers').$type<string[]>(),
   createdById: text('created_by_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
   invitationSentAt: timestamp('invitation_sent_at'),
@@ -542,6 +548,97 @@ export const emailTemplate = pgTable('email_template', {
 }, (t) => ([
   index('email_template_organization_id_idx').on(t.organizationId),
   index('email_template_created_by_id_idx').on(t.createdById),
+]))
+
+// ─────────────────────────────────────────────
+// Candidate Messaging
+// ─────────────────────────────────────────────
+
+/** One email thread per application, routed through an unguessable reply token. */
+export const candidateConversation = pgTable('candidate_conversation', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  applicationId: text('application_id').notNull().references(() => application.id, { onDelete: 'cascade' }),
+  replyToken: text('reply_token').notNull().$defaultFn(() => crypto.randomUUID().replaceAll('-', '')),
+  unreadCount: integer('unread_count').notNull().default(0),
+  lastMessageAt: timestamp('last_message_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (t) => ([
+  index('candidate_conversation_organization_id_idx').on(t.organizationId),
+  uniqueIndex('candidate_conversation_application_id_idx').on(t.applicationId),
+  uniqueIndex('candidate_conversation_reply_token_idx').on(t.replyToken),
+  index('candidate_conversation_last_message_at_idx').on(t.organizationId, t.lastMessageAt),
+]))
+
+/** Durable email content plus provider and RFC threading identities. */
+export const candidateMessage = pgTable('candidate_message', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  conversationId: text('conversation_id').notNull().references(() => candidateConversation.id, { onDelete: 'cascade' }),
+  direction: candidateMessageDirectionEnum('direction').notNull(),
+  status: candidateMessageStatusEnum('status').notNull(),
+  fromEmail: text('from_email').notNull(),
+  toEmail: text('to_email').notNull(),
+  subject: text('subject').notNull(),
+  bodyText: text('body_text').notNull(),
+  /** Distinguishes ordinary replies from interview lifecycle messages. */
+  kind: text('kind').$type<'message' | 'interview_proposal' | 'interview_update' | 'interview_cancellation' | 'interview_response'>().notNull().default('message'),
+  interviewId: text('interview_id').references(() => interview.id, { onDelete: 'set null' }),
+  /** ICS generation/delivery is tracked independently from provider delivery. */
+  calendarAttachmentStatus: text('calendar_attachment_status').$type<'not_applicable' | 'attached' | 'failed'>().notNull().default('not_applicable'),
+  calendarAttachmentError: text('calendar_attachment_error'),
+  calendarSequence: integer('calendar_sequence'),
+  providerMessageId: text('provider_message_id'),
+  internetMessageId: text('internet_message_id'),
+  inReplyTo: text('in_reply_to'),
+  references: jsonb('references').$type<string[]>(),
+  sentById: text('sent_by_id').references(() => user.id, { onDelete: 'set null' }),
+  providerStatusAt: timestamp('provider_status_at'),
+  sentAt: timestamp('sent_at'),
+  deliveredAt: timestamp('delivered_at'),
+  failedAt: timestamp('failed_at'),
+  errorCode: text('error_code'),
+  errorMessage: text('error_message'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (t) => ([
+  index('candidate_message_organization_id_idx').on(t.organizationId),
+  index('candidate_message_conversation_id_idx').on(t.conversationId, t.createdAt),
+  index('candidate_message_interview_id_idx').on(t.interviewId, t.createdAt),
+  uniqueIndex('candidate_message_provider_id_idx').on(t.providerMessageId),
+  uniqueIndex('candidate_message_internet_id_idx').on(t.internetMessageId),
+]))
+
+/** File metadata for message attachments. Raw bytes live in S3/MinIO. */
+export const candidateMessageAttachment = pgTable('candidate_message_attachment', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  messageId: text('message_id').notNull().references(() => candidateMessage.id, { onDelete: 'cascade' }),
+  storageKey: text('storage_key').notNull().unique(),
+  filename: text('filename').notNull(),
+  mimeType: text('mime_type').notNull(),
+  sizeBytes: integer('size_bytes').notNull(),
+  /** Resend attachment identity for replay-safe inbound webhook processing. */
+  providerAttachmentId: text('provider_attachment_id').unique(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (t) => ([
+  index('candidate_message_attachment_organization_id_idx').on(t.organizationId),
+  index('candidate_message_attachment_message_id_idx').on(t.messageId),
+]))
+
+/** Resend delivers webhooks at least once; this table makes processing replay-safe. */
+export const candidateMessageWebhookEvent = pgTable('candidate_message_webhook_event', {
+  id: text('id').primaryKey(),
+  type: text('type').notNull(),
+  providerMessageId: text('provider_message_id'),
+  occurredAt: timestamp('occurred_at').notNull(),
+  processedAt: timestamp('processed_at'),
+  lastError: text('last_error'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (t) => ([
+  index('candidate_message_webhook_provider_id_idx').on(t.providerMessageId),
+  index('candidate_message_webhook_unprocessed_idx').on(t.processedAt),
 ]))
 
 export const commentTargetEnum = pgEnum('comment_target', ['candidate', 'application', 'job'])
@@ -878,6 +975,7 @@ export const applicationRelations = relations(application, ({ one, many }) => ({
   criterionScores: many(criterionScore),
   analysisRuns: many(analysisRun),
   source: one(applicationSource),
+  conversation: one(candidateConversation),
 }))
 
 export const documentRelations = relations(document, ({ one }) => ({
@@ -928,15 +1026,35 @@ export const joinRequestRelations = relations(joinRequest, ({ one }) => ({
   reviewedBy: one(user, { fields: [joinRequest.reviewedById], references: [user.id] }),
 }))
 
-export const interviewRelations = relations(interview, ({ one }) => ({
+export const interviewRelations = relations(interview, ({ one, many }) => ({
   organization: one(organization, { fields: [interview.organizationId], references: [organization.id] }),
   application: one(application, { fields: [interview.applicationId], references: [application.id] }),
   createdBy: one(user, { fields: [interview.createdById], references: [user.id] }),
+  messages: many(candidateMessage),
 }))
 
 export const emailTemplateRelations = relations(emailTemplate, ({ one }) => ({
   organization: one(organization, { fields: [emailTemplate.organizationId], references: [organization.id] }),
   createdBy: one(user, { fields: [emailTemplate.createdById], references: [user.id] }),
+}))
+
+export const candidateConversationRelations = relations(candidateConversation, ({ one, many }) => ({
+  organization: one(organization, { fields: [candidateConversation.organizationId], references: [organization.id] }),
+  application: one(application, { fields: [candidateConversation.applicationId], references: [application.id] }),
+  messages: many(candidateMessage),
+}))
+
+export const candidateMessageRelations = relations(candidateMessage, ({ one, many }) => ({
+  organization: one(organization, { fields: [candidateMessage.organizationId], references: [organization.id] }),
+  conversation: one(candidateConversation, { fields: [candidateMessage.conversationId], references: [candidateConversation.id] }),
+  sentBy: one(user, { fields: [candidateMessage.sentById], references: [user.id] }),
+  interview: one(interview, { fields: [candidateMessage.interviewId], references: [interview.id] }),
+  attachments: many(candidateMessageAttachment),
+}))
+
+export const candidateMessageAttachmentRelations = relations(candidateMessageAttachment, ({ one }) => ({
+  organization: one(organization, { fields: [candidateMessageAttachment.organizationId], references: [organization.id] }),
+  message: one(candidateMessage, { fields: [candidateMessageAttachment.messageId], references: [candidateMessage.id] }),
 }))
 
 export const calendarIntegrationRelations = relations(calendarIntegration, ({ one }) => ({

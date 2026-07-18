@@ -6,7 +6,7 @@ import { verifyInterviewToken } from '../../../utils/interview-token'
  * GET /api/public/interviews/respond?token=xxx
  *
  * Public endpoint for candidates to preview an interview invitation before responding.
- * Returns interview details + the action encoded in the HMAC-signed token.
+ * Returns interview details for the HMAC-signed response token.
  * No authentication required — the token is the proof of authorization.
  */
 export default defineEventHandler(async (event) => {
@@ -45,7 +45,6 @@ export default defineEventHandler(async (event) => {
   })
 
   return {
-    action: payload.action,
     interview: {
       id: interviewRecord.id,
       title: interviewRecord.title,

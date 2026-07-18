@@ -10,7 +10,9 @@ let _db: DB | undefined
 /**
  * Lazily create the Drizzle client on first access.
  * Prevents build-time prerendering from crashing when DATABASE_URL
- * isn't available (Railway injects env vars only at deploy time).
+ * isn't available (Railway injects env vars only at deploy time). The env
+ * validator also normalizes broken Railway preview references before this
+ * client is created.
  */
 function getDB(): DB {
   if (!_db) {

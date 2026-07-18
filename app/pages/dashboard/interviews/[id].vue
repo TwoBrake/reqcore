@@ -3,8 +3,8 @@ import {
   ArrowLeft, Calendar, Clock, Video, Phone, Building2, Code2,
   FileText, UsersRound, CheckCircle2, XCircle, AlertTriangle,
   UserRound, Briefcase, Pencil, MapPin, Users, MessageSquare,
-  Save, X, Mail, Send, CheckCheck, ChevronDown, ExternalLink,
-  Check, AlertCircle,
+  Save, X, Mail, CheckCheck, ExternalLink, RefreshCw,
+  AlertCircle,
 } from 'lucide-vue-next'
 
 definePageMeta({
@@ -16,9 +16,9 @@ const route = useRoute()
 const interviewId = route.params.id as string
 const { handlePreviewReadOnlyError } = usePreviewReadOnly()
 const toast = useToast()
-const { activeOrg } = useCurrentOrg()
 const { track } = useTrack()
 const { formatPersonName } = useOrgSettings()
+const { reportStatus, reportCandidateUpdate } = useInterviewMutationFeedback()
 
 const { interview, status: fetchStatus, error, updateInterview, deleteInterview, refresh } = useInterview(interviewId)
 
@@ -94,15 +94,31 @@ const allowedTransitions = computed(() => {
   return (INTERVIEW_STATUS_TRANSITIONS[interview.value.status] ?? []) as InterviewStatus[]
 })
 
+// Rescheduling (transition back to `scheduled`) is handled by the dedicated
+// Reschedule button, so the status-mark buttons only cover forward marks.
+const statusMarkTransitions = computed(
+  () => allowedTransitions.value.filter(s => s !== 'scheduled') as Exclude<InterviewStatus, 'scheduled'>[],
+)
+
 const isTransitioning = ref(false)
+const pendingTransition = ref<Exclude<InterviewStatus, 'scheduled'> | null>(null)
+
+function requestTransition(newStatus: Exclude<InterviewStatus, 'scheduled'>) {
+  pendingTransition.value = newStatus
+}
 
 async function handleTransition(newStatus: InterviewStatus) {
+  if (!interview.value) return
+  const fromStatus = interview.value.status
+  const candidateEmail = interview.value.candidateEmail
   isTransitioning.value = true
   try {
-    await updateInterview({ status: newStatus })
+    const result = await updateInterview({ status: newStatus })
+    pendingTransition.value = null
+    reportStatus(newStatus, result, candidateEmail)
     track('interview_status_changed', {
       interview_id: interviewId,
-      from_status: interview.value?.status,
+      from_status: fromStatus,
       to_status: newStatus,
     })
   } catch (err: any) {
@@ -132,6 +148,23 @@ function formatDate(dateStr: string) {
     day: 'numeric',
     year: 'numeric',
   })
+}
+
+function deliveryKindLabel(kind: NonNullable<Interview['latestDelivery']>['kind']) {
+  const labels = {
+    message: 'Candidate message',
+    interview_proposal: 'Interview proposal',
+    interview_update: 'Interview update',
+    interview_cancellation: 'Interview cancellation',
+    interview_response: 'Interview response',
+  }
+  return labels[kind]
+}
+
+function deliveryStatusLabel(status: NonNullable<Interview['latestDelivery']>['status']) {
+  return status === 'complained'
+    ? 'Spam complaint'
+    : status.charAt(0).toUpperCase() + status.slice(1)
 }
 
 function isUpcoming(dateStr: string) {
@@ -169,46 +202,15 @@ async function saveNotes() {
 
 // ─── Reschedule ──────────────────────────────────────────────────
 const showReschedule = ref(false)
-const rescheduleForm = reactive({
-  date: '',
-  time: '',
-  duration: 60,
-})
-const isRescheduling = ref(false)
-const rescheduleError = ref('')
 
 function openReschedule() {
   if (!interview.value) return
-  const d = new Date(interview.value.scheduledAt)
-  rescheduleForm.date = d.toISOString().slice(0, 10)
-  rescheduleForm.time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  rescheduleForm.duration = interview.value.duration
-  rescheduleError.value = ''
   showReschedule.value = true
 }
 
-async function handleReschedule() {
-  rescheduleError.value = ''
-  if (!rescheduleForm.date || !rescheduleForm.time) {
-    rescheduleError.value = 'Date and time are required'
-    return
-  }
-
-  isRescheduling.value = true
-  try {
-    const scheduledAt = new Date(`${rescheduleForm.date}T${rescheduleForm.time}`).toISOString()
-    await updateInterview({
-      scheduledAt,
-      duration: rescheduleForm.duration,
-      status: 'scheduled',
-    })
-    showReschedule.value = false
-  } catch (err: any) {
-    if (handlePreviewReadOnlyError(err)) return
-    rescheduleError.value = err.data?.statusMessage ?? 'Failed to reschedule'
-  } finally {
-    isRescheduling.value = false
-  }
+async function handleRescheduled() {
+  showReschedule.value = false
+  await refresh()
 }
 
 // ─── Edit details ────────────────────────────────────────────────
@@ -242,13 +244,16 @@ async function handleSaveDetails() {
   isSavingEdit.value = true
   try {
     const filteredInterviewers = editForm.interviewers.filter(i => i.trim())
-    await updateInterview({
+    const result = await updateInterview({
       title: editForm.title.trim(),
       type: editForm.type as any,
       location: editForm.location.trim() || null,
       interviewers: filteredInterviewers.length > 0 ? filteredInterviewers : null,
     })
     showEditDetails.value = false
+    if (result.notification.intent) {
+      reportCandidateUpdate(result, interview.value!.candidateEmail)
+    }
   } catch (err: any) {
     if (handlePreviewReadOnlyError(err)) return
     editErrors.value.submit = err.data?.statusMessage ?? 'Failed to update'
@@ -258,7 +263,6 @@ async function handleSaveDetails() {
 }
 
 // ─── Delete ──────────────────────────────────────────────────────
-const router = useRouter()
 const showDeleteConfirm = ref(false)
 const isDeleting = ref(false)
 
@@ -275,79 +279,24 @@ async function handleDelete() {
   }
 }
 
-// ─── Email invitation (inline) ───────────────────────────────────
-const showSendInvitation = ref(false)
-const selectedTemplateId = ref<string>('system-standard')
-const isSendingEmail = ref(false)
-const sendEmailError = ref('')
-const sendEmailSuccess = ref(false)
-const showEmailPreview = ref(false)
+// ─── Conversation delivery retry ─────────────────────────────────
+const isRetryingDelivery = ref(false)
 
-const { templates: emailTemplates, sendInvitation } = useEmailTemplates()
-
-const allTemplates = computed(() => [
-  ...SYSTEM_TEMPLATES.map(t => ({ ...t, isSystem: true as const })),
-  ...(emailTemplates.value ?? []).map(t => ({ ...t, isSystem: false as const, description: '' })),
-])
-
-const selectedTemplate = computed(() =>
-  allTemplates.value.find(t => t.id === selectedTemplateId.value),
-)
-
-const emailPreviewVariables = computed(() => {
-  if (!interview.value) return {} as Record<string, string>
-  return {
-    candidateName: `${interview.value.candidateFirstName} ${interview.value.candidateLastName}`,
-    candidateFirstName: interview.value.candidateFirstName,
-    candidateLastName: interview.value.candidateLastName,
-    candidateEmail: interview.value.candidateEmail,
-    jobTitle: interview.value.jobTitle,
-    interviewTitle: interview.value.title,
-    interviewDate: new Date(interview.value.scheduledAt).toLocaleDateString('en-US', {
-      weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
-    }),
-    interviewTime: new Date(interview.value.scheduledAt).toLocaleTimeString('en-US', {
-      hour: 'numeric', minute: '2-digit', hour12: true,
-    }),
-    interviewDuration: String(interview.value.duration),
-    interviewType: ({
-      video: 'Video Call', phone: 'Phone Call', in_person: 'In Person',
-      technical: 'Technical Interview', panel: 'Panel Interview', take_home: 'Take-Home Assignment',
-    } as Record<string, string>)[interview.value.type] ?? interview.value.type,
-    interviewLocation: interview.value.location ?? 'To be confirmed',
-    interviewers: interview.value.interviewers?.join(', ') ?? 'To be confirmed',
-    organizationName: activeOrg.value?.name ?? 'Your Organization',
-  }
-})
-
-const emailPreviewSubject = computed(() =>
-  selectedTemplate.value ? renderTemplatePreview(selectedTemplate.value.subject, emailPreviewVariables.value) : '',
-)
-
-const emailPreviewBody = computed(() =>
-  selectedTemplate.value ? renderTemplatePreview(selectedTemplate.value.body, emailPreviewVariables.value) : '',
-)
-
-async function handleSendInvitation() {
-  sendEmailError.value = ''
-  isSendingEmail.value = true
+async function retryDelivery() {
+  isRetryingDelivery.value = true
   try {
-    await sendInvitation(interviewId, { templateId: selectedTemplateId.value })
-    sendEmailSuccess.value = true
-    setTimeout(async () => {
-      sendEmailSuccess.value = false
-      showSendInvitation.value = false
-      await refresh()
-    }, 2000)
+    const result = await $fetch<{ success: boolean, delivery: { errorMessage: string | null } }>(`/api/interviews/${interviewId}/send-invitation`, { method: 'POST' })
+    await refresh()
+    const isCancellation = interview.value?.latestDelivery?.kind === 'interview_cancellation'
+    if (result.success) toast.success(isCancellation ? 'Cancellation sent' : 'Interview update sent')
+    else toast.error(isCancellation ? 'Cancellation not sent' : 'Interview update not sent', { message: result.delivery.errorMessage ?? undefined })
   } catch (err: any) {
     if (handlePreviewReadOnlyError(err)) return
-    sendEmailError.value = err?.data?.statusMessage ?? err?.message ?? 'Failed to send invitation'
+    toast.error('Retry failed', { message: err?.data?.statusMessage ?? err?.message })
   } finally {
-    isSendingEmail.value = false
+    isRetryingDelivery.value = false
   }
 }
-
-const localePath = useLocalePath()
 </script>
 
 <template>
@@ -438,6 +387,16 @@ const localePath = useLocalePath()
           <CheckCheck class="size-3.5" />
           Invitation sent <TimelineDateLink :date="interview.invitationSentAt" class="text-success-600 dark:text-success-400">{{ formatDate(interview.invitationSentAt) }}</TimelineDateLink>
         </div>
+        <div
+          v-if="interview.latestDelivery"
+          class="mt-2 flex items-center gap-1.5 text-xs"
+          :class="['failed', 'bounced', 'complained'].includes(interview.latestDelivery.status)
+            ? 'text-danger-600 dark:text-danger-400'
+            : 'text-surface-500 dark:text-surface-400'"
+        >
+          <Mail class="size-3.5" />
+          {{ deliveryKindLabel(interview.latestDelivery.kind) }}: {{ deliveryStatusLabel(interview.latestDelivery.status) }}
+        </div>
         <!-- Google Calendar sync status -->
         <div
           v-if="interview.googleCalendarEventId"
@@ -455,6 +414,13 @@ const localePath = useLocalePath()
         </div>
       </div>
 
+      <InterviewCandidateResponse
+        class="mb-6"
+        :response="interview.candidateResponse"
+        :responded-at="interview.candidateRespondedAt"
+        variant="panel"
+      />
+
       <!-- Quick actions -->
       <div
         v-if="allowedTransitions.length > 0"
@@ -463,18 +429,20 @@ const localePath = useLocalePath()
         <div class="flex flex-wrap items-center gap-2">
           <span class="inline-flex items-center rounded-full bg-surface-100 dark:bg-surface-800 px-2.5 py-1 text-xs font-medium text-surface-600 dark:text-surface-400">Quick actions</span>
           <button
-            v-for="nextStatus in allowedTransitions"
+            v-for="nextStatus in statusMarkTransitions"
             :key="nextStatus"
             :disabled="isTransitioning"
             class="inline-flex cursor-pointer items-center rounded-full px-3.5 py-1.5 text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:cursor-not-allowed disabled:opacity-50"
             :class="transitionClasses[nextStatus]"
-            @click="handleTransition(nextStatus)"
+            @click="requestTransition(nextStatus)"
           >
             <span
               class="mr-2 inline-flex size-1.5 rounded-full"
-              :class="nextStatus === 'completed' ? 'bg-success-200' : nextStatus === 'cancelled' ? 'bg-surface-200' : nextStatus === 'no_show' ? 'bg-danger-200' : 'bg-brand-200'"
+              :class="nextStatus === 'completed' ? 'bg-success-200' : nextStatus === 'cancelled' ? 'bg-surface-200' : 'bg-danger-200'"
             />
-            {{ nextStatus === 'scheduled' ? 'Re-schedule' : `Mark ${statusConfig[nextStatus]?.label}` }}
+            {{ nextStatus === 'cancelled' && interview.invitationSentAt
+              ? 'Cancel & notify'
+              : `Mark ${statusConfig[nextStatus]?.label}` }}
           </button>
           <button
             class="inline-flex cursor-pointer items-center rounded-full border border-brand-200 dark:border-brand-800 bg-brand-50 dark:bg-brand-950/30 px-3.5 py-1.5 text-sm font-medium text-brand-700 dark:text-brand-300 hover:bg-brand-100 dark:hover:bg-brand-950/50 transition-all duration-150"
@@ -484,154 +452,27 @@ const localePath = useLocalePath()
             Reschedule
           </button>
           <button
-            v-if="interview.status === 'scheduled'"
+            v-if="['scheduled', 'cancelled'].includes(interview.status) && interview.latestDelivery?.status === 'failed'"
             class="inline-flex cursor-pointer items-center rounded-full border border-success-200 dark:border-success-800 bg-success-50 dark:bg-success-950/30 px-3.5 py-1.5 text-sm font-medium text-success-700 dark:text-success-300 hover:bg-success-100 dark:hover:bg-success-950/50 transition-all duration-150"
-            @click="showSendInvitation = !showSendInvitation"
+            :disabled="isRetryingDelivery"
+            @click="retryDelivery"
           >
-            <Mail class="mr-1.5 size-3.5" />
-            {{ interview.invitationSentAt ? 'Resend Invitation' : 'Send Invitation' }}
-            <ChevronDown class="ml-1 size-3 transition-transform" :class="showSendInvitation ? 'rotate-180' : ''" />
+            <RefreshCw class="mr-1.5 size-3.5" :class="isRetryingDelivery ? 'animate-spin' : ''" />
+            Retry delivery
           </button>
         </div>
       </div>
 
-      <!-- Send Invitation inline panel -->
-      <Transition
-        enter-active-class="transition duration-200 ease-out"
-        enter-from-class="opacity-0 -translate-y-2"
-        enter-to-class="opacity-100 translate-y-0"
-        leave-active-class="transition duration-150 ease-in"
-        leave-from-class="opacity-100 translate-y-0"
-        leave-to-class="opacity-0 -translate-y-2"
+      <div
+        v-if="interview.latestDelivery?.status === 'failed'"
+        class="mb-6 flex items-start gap-3 rounded-lg border border-danger-200 bg-danger-50 p-4 text-sm text-danger-700 dark:border-danger-900 dark:bg-danger-950/30 dark:text-danger-300"
       >
-        <div v-if="showSendInvitation" class="mb-6 rounded-xl border border-brand-200 dark:border-brand-800/60 bg-white dark:bg-surface-900 overflow-hidden shadow-sm">
-          <!-- Success state -->
-          <div v-if="sendEmailSuccess" class="flex flex-col items-center justify-center py-10 px-6">
-            <div class="flex size-12 items-center justify-center rounded-full bg-success-100 dark:bg-success-950/40 mb-3">
-              <Check class="size-6 text-success-600 dark:text-success-400" />
-            </div>
-            <h3 class="text-base font-semibold text-surface-900 dark:text-surface-100 mb-1">Invitation Sent!</h3>
-            <p class="text-sm text-surface-500 dark:text-surface-400">Email sent to {{ interview.candidateEmail }}</p>
-          </div>
-
-          <template v-else>
-            <!-- Panel header -->
-            <div class="border-b border-brand-100 dark:border-brand-900/40 bg-brand-50/50 dark:bg-brand-950/20 px-5 py-3.5">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2.5">
-                  <div class="flex size-8 items-center justify-center rounded-lg bg-brand-100 dark:bg-brand-900/40">
-                    <Mail class="size-4 text-brand-600 dark:text-brand-400" />
-                  </div>
-                  <div>
-                    <h3 class="text-sm font-semibold text-surface-800 dark:text-surface-200">Send Interview Invitation</h3>
-                    <p class="text-xs text-surface-500 dark:text-surface-400">to {{ interview.candidateEmail }}</p>
-                  </div>
-                </div>
-                <button
-                  class="cursor-pointer rounded-lg p-1.5 text-surface-400 hover:text-surface-600 hover:bg-surface-100 dark:hover:text-surface-300 dark:hover:bg-surface-800 transition-all"
-                  @click="showSendInvitation = false"
-                >
-                  <X class="size-4" />
-                </button>
-              </div>
-            </div>
-
-            <!-- Error -->
-            <div v-if="sendEmailError" class="mx-5 mt-4 flex items-start gap-2.5 rounded-xl border border-danger-200/80 bg-danger-50 p-3.5 text-sm text-danger-700 dark:border-danger-800/60 dark:bg-danger-950/40 dark:text-danger-300">
-              <AlertCircle class="size-4 shrink-0 mt-0.5" />
-              {{ sendEmailError }}
-            </div>
-
-            <!-- Template selection -->
-            <div class="p-5">
-              <div class="flex items-center justify-between mb-3">
-                <p class="text-xs font-semibold uppercase tracking-wider text-surface-500 dark:text-surface-400">Choose a Template</p>
-                <NuxtLink
-                  :to="localePath('/dashboard/interviews/templates')"
-                  class="inline-flex items-center gap-1 text-xs font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 transition-colors no-underline"
-                >
-                  Manage Templates
-                  <ExternalLink class="size-3" />
-                </NuxtLink>
-              </div>
-
-              <div class="grid gap-2 sm:grid-cols-2">
-                <button
-                  v-for="t in allTemplates"
-                  :key="t.id"
-                  type="button"
-                  class="w-full text-left rounded-xl border-2 p-3.5 transition-all duration-150 cursor-pointer"
-                  :class="selectedTemplateId === t.id
-                    ? 'border-brand-500 bg-brand-50/50 dark:border-brand-400 dark:bg-brand-950/20 shadow-sm'
-                    : 'border-surface-200 dark:border-surface-700/80 hover:border-surface-300 dark:hover:border-surface-600 hover:bg-surface-50 dark:hover:bg-surface-800/40'"
-                  @click="selectedTemplateId = t.id"
-                >
-                  <div class="flex items-center justify-between mb-1">
-                    <span class="text-sm font-semibold text-surface-800 dark:text-surface-200">{{ t.name }}</span>
-                    <span v-if="t.isSystem" class="text-[10px] uppercase tracking-wider font-semibold text-surface-400 bg-surface-100 dark:bg-surface-800 px-1.5 py-0.5 rounded">
-                      Built-in
-                    </span>
-                  </div>
-                  <p class="text-xs text-surface-500 dark:text-surface-400 truncate">{{ t.subject }}</p>
-                </button>
-              </div>
-
-              <!-- Preview toggle -->
-              <div v-if="selectedTemplate" class="mt-4">
-                <button
-                  type="button"
-                  class="flex items-center gap-1.5 text-sm font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 transition-colors cursor-pointer"
-                  @click="showEmailPreview = !showEmailPreview"
-                >
-                  <component :is="showEmailPreview ? X : Mail" class="size-3.5" />
-                  {{ showEmailPreview ? 'Hide Preview' : 'Preview Email' }}
-                </button>
-                <Transition
-                  enter-active-class="transition duration-200 ease-out"
-                  enter-from-class="opacity-0 -translate-y-1"
-                  enter-to-class="opacity-100 translate-y-0"
-                  leave-active-class="transition duration-100 ease-in"
-                  leave-from-class="opacity-100"
-                  leave-to-class="opacity-0"
-                >
-                  <div v-if="showEmailPreview" class="mt-3 rounded-xl border border-surface-200 dark:border-surface-700/80 bg-surface-50 dark:bg-surface-800/40 p-4">
-                    <div class="mb-3">
-                      <span class="text-[10px] uppercase tracking-wider font-semibold text-surface-400">Subject</span>
-                      <p class="text-sm font-semibold text-surface-800 dark:text-surface-200">{{ emailPreviewSubject }}</p>
-                    </div>
-                    <div class="border-t border-surface-200 dark:border-surface-700 pt-3">
-                      <span class="text-[10px] uppercase tracking-wider font-semibold text-surface-400">Body</span>
-                      <p class="text-sm text-surface-700 dark:text-surface-300 whitespace-pre-wrap mt-1 leading-relaxed">{{ emailPreviewBody }}</p>
-                    </div>
-                  </div>
-                </Transition>
-              </div>
-            </div>
-
-            <!-- Send button -->
-            <div class="border-t border-surface-100 dark:border-surface-800 bg-surface-50/80 dark:bg-surface-950/40 px-5 py-4">
-              <div class="flex items-center gap-3">
-                <button
-                  type="button"
-                  class="flex-1 rounded-xl border border-surface-200 dark:border-surface-700 px-4 py-2.5 text-sm font-medium text-surface-700 dark:text-surface-300 hover:bg-surface-100 dark:hover:bg-surface-800 transition-all cursor-pointer"
-                  @click="showSendInvitation = false"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  :disabled="!selectedTemplateId || isSendingEmail"
-                  class="flex-1 flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer shadow-sm shadow-brand-500/20"
-                  @click="handleSendInvitation"
-                >
-                  <Send class="size-4" />
-                  {{ isSendingEmail ? 'Sending…' : 'Send Invitation' }}
-                </button>
-              </div>
-            </div>
-          </template>
+        <AlertCircle class="mt-0.5 size-4 shrink-0" />
+        <div>
+          <p class="font-medium">{{ interview.latestDelivery.kind === 'interview_cancellation' ? 'The cancellation was not sent.' : 'The latest candidate update was not sent.' }}</p>
+          <p class="mt-1">{{ interview.latestDelivery.errorMessage }}</p>
         </div>
-      </Transition>
+      </div>
 
       <!-- Detail cards -->
       <div class="grid gap-4 md:grid-cols-2">
@@ -826,72 +667,16 @@ const localePath = useLocalePath()
       </div>
     </template>
 
-    <!-- Reschedule Modal -->
-    <Teleport to="body">
-      <div v-if="showReschedule" class="fixed inset-0 z-50 flex items-center justify-center">
-        <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="showReschedule = false" />
-        <div class="relative bg-white dark:bg-surface-900 rounded-2xl shadow-2xl shadow-surface-900/10 dark:shadow-black/30 ring-1 ring-surface-200/80 dark:ring-surface-700/60 p-6 max-w-md w-full mx-4">
-          <h3 class="text-lg font-semibold text-surface-900 dark:text-surface-100 mb-4">Reschedule Interview</h3>
-
-          <div v-if="rescheduleError" class="mb-4 rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700 dark:border-danger-800 dark:bg-danger-950/40 dark:text-danger-300">
-            {{ rescheduleError }}
-          </div>
-
-          <form class="space-y-4" @submit.prevent="handleReschedule">
-            <div>
-              <label for="reschedule-date" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
-                Date <span class="text-danger-500">*</span>
-              </label>
-              <input
-                id="reschedule-date"
-                v-model="rescheduleForm.date"
-                type="date"
-                class="w-full rounded-lg border border-surface-300 dark:border-surface-700 px-3 py-2 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-colors"
-              />
-            </div>
-            <div>
-              <label for="reschedule-time" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
-                Time <span class="text-danger-500">*</span>
-              </label>
-              <input
-                id="reschedule-time"
-                v-model="rescheduleForm.time"
-                type="time"
-                class="w-full rounded-lg border border-surface-300 dark:border-surface-700 px-3 py-2 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-colors"
-              />
-            </div>
-            <div>
-              <label for="reschedule-duration" class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Duration (minutes)</label>
-              <input
-                id="reschedule-duration"
-                v-model.number="rescheduleForm.duration"
-                type="number"
-                min="5"
-                max="480"
-                class="w-full rounded-lg border border-surface-300 dark:border-surface-700 px-3 py-2 text-sm text-surface-900 dark:text-surface-100 bg-white dark:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-colors"
-              />
-            </div>
-
-            <div class="flex items-center justify-end gap-3 pt-2">
-              <button
-                type="button"
-                class="cursor-pointer rounded-lg border border-surface-300 dark:border-surface-700 px-4 py-2 text-sm font-medium text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 transition-colors"
-                @click="showReschedule = false"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                :disabled="isRescheduling"
-                class="cursor-pointer rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {{ isRescheduling ? 'Saving…' : 'Reschedule' }}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </Teleport>
+    <!-- Reschedule Sidebar -->
+    <InterviewScheduleSidebar
+      v-if="showReschedule && interview"
+      :application-id="interview.applicationId"
+      :candidate-name="formatPersonName(interview.candidateFirstName, interview.candidateLastName)"
+      :job-title="interview.jobTitle"
+      :interview="interview"
+      @close="showReschedule = false"
+      @scheduled="handleRescheduled"
+    />
 
     <!-- Edit Details Modal -->
     <Teleport to="body">
@@ -1004,7 +789,7 @@ const localePath = useLocalePath()
         <div class="relative bg-white dark:bg-surface-900 rounded-2xl shadow-2xl shadow-surface-900/10 dark:shadow-black/30 ring-1 ring-surface-200/80 dark:ring-surface-700/60 p-6 max-w-sm w-full mx-4">
           <h3 class="text-lg font-semibold text-surface-900 dark:text-surface-100 mb-2">Delete Interview</h3>
           <p class="text-sm text-surface-600 dark:text-surface-400 mb-4">
-            Are you sure you want to delete <strong>{{ interview?.title }}</strong>? This action cannot be undone.
+            Delete <strong>{{ interview?.title }}</strong> from Reqcore? Deleting does not message the candidate and cannot be undone.
           </p>
           <div class="flex justify-end gap-2">
             <button
@@ -1025,6 +810,17 @@ const localePath = useLocalePath()
         </div>
       </div>
     </Teleport>
+
+    <InterviewStatusActionDialog
+      :open="!!pendingTransition"
+      :action="pendingTransition"
+      :candidate-name="formatPersonName(interview?.candidateFirstName, interview?.candidateLastName)"
+      :candidate-email="interview?.candidateEmail ?? ''"
+      :invitation-sent-at="interview?.invitationSentAt ?? null"
+      :loading="isTransitioning"
+      @close="pendingTransition = null"
+      @confirm="pendingTransition && handleTransition(pendingTransition)"
+    />
 
   </div>
 </template>

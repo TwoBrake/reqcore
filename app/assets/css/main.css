@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 @source "../../../shared/properties.ts";
+@source "../../../ee/app/**/*.{vue,ts}";
 
 /* ─────────────────────────────────────────────────────────
    Reqcore — Design System

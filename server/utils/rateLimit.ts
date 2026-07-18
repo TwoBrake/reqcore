@@ -133,8 +133,10 @@ export function createRateLimiter(config: RateLimitConfig) {
  * TRUSTED_PROXY_IP env var to enable header-based IP extraction.
  */
 function getClientIp(event: H3Event): string {
-  // Only trust proxy headers when explicitly configured via validated env schema
-  const trustedProxy = env.TRUSTED_PROXY_IP
+  // Keep this global middleware independent of the complete application env
+  // schema. Otherwise one unrelated invalid variable turns every API response
+  // into a generic 500 before its route can report the actual problem.
+  const trustedProxy = process.env.TRUSTED_PROXY_IP?.trim()
   if (trustedProxy) {
     const socketIp = getRequestIP(event)
     if (socketIp === trustedProxy) {

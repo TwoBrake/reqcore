@@ -19,6 +19,7 @@ describe('buildPgDumpEnv', () => {
     'OIDC_CLIENT_SECRET',
     'CRON_SECRET',
     'RESEND_API_KEY',
+    'RESEND_RECEIVING_API_KEY',
     'SMTP_PASS',
     'GITHUB_FEEDBACK_TOKEN',
     'SENTRY_DSN',
