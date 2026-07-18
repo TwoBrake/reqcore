@@ -5,7 +5,7 @@
  * email provider — an unverified account created throwaway organizations and
  * blasted invitations to unrelated addresses. These caps bound the blast radius
  * of any single account/organization on every endpoint that triggers outbound
- * email, independent of email verification (which stops disposable accounts) and
+ * email, independent of email verification (which proves mailbox ownership) and
  * plan-based business limits (which meter legitimate usage, not abuse).
  *
  * The numbers are deliberately generous for real recruiting teams and tight

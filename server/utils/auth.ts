@@ -9,6 +9,7 @@ import { APIError } from "better-auth/api";
 import { ac, owner, admin, member } from "~~/shared/permissions";
 import { isBillingActionAllowed } from "~~/shared/billing";
 import { sendOrgInvitationEmail, sendPasswordResetEmail, sendVerificationEmail } from "./email";
+import { deferredEmailVerification } from "./email-verification";
 import { isDisposableEmailDomain } from "./disposable-email-domains";
 import { OUTBOUND_LIMITS } from "~~/shared/abuse-limits";
 import { getMissingStripeBillingVars, isStripeBillingConfigured } from "./env";
@@ -263,15 +264,6 @@ function getAuth(): Auth {
   if (!_auth) {
     const baseURL = resolveBetterAuthUrl();
 
-    // Enforce email verification only in real (production) deployments — same
-    // convention as the built-in rate limiter below. E2E and local dev run
-    // without a mail provider, so gating a session on a clickable link there
-    // would break the suite and block developers; production always enforces it.
-    const enforceEmailVerification =
-      process.env.NODE_ENV === "production"
-      && !process.env.CI
-      && !process.env.GITHUB_ACTIONS;
-
     const stripeBillingConfigured = isStripeBillingConfigured(env);
     const missingStripeBillingVars = getMissingStripeBillingVars(env);
 
@@ -301,13 +293,9 @@ function getAuth(): Auth {
 
       emailAndPassword: {
         enabled: true,
-        // ── Require verified email before any session ────────────
-        // A verified session is the trust gate for every outbound side
-        // effect (invitations, candidate messages, interview invites).
-        // Without this, disposable-mail accounts got a full session
-        // instantly and used our email provider as a spam relay.
-        // Sign-in of an unverified user is refused and (re)sends the link.
-        requireEmailVerification: enforceEmailVerification,
+        // Signup creates a session immediately. Mailbox ownership is enforced
+        // later, at each user-triggered outbound email boundary.
+        requireEmailVerification: deferredEmailVerification.requireBeforeSignIn,
         // Server-side password policy — prevents bypass via direct API calls.
         // Client-side validation (sign-up.vue) is UX only; this is the enforcement.
         minPasswordLength: 8,
@@ -320,12 +308,11 @@ function getAuth(): Auth {
 
       // ── Email Verification ───────────────────────────────────
       // Delivers the verification link (template lives in email.ts).
-      // Better Auth sends it automatically on sign-up and again on any
-      // sign-in attempt by an unverified user. autoSignInAfterVerification
-      // logs the user in when they click the link so the flow completes
-      // in one step.
+      // Better Auth sends this in the background while signup continues into
+      // onboarding. The dashboard keeps a resend action available until the
+      // mailbox is verified.
       emailVerification: {
-        sendOnSignUp: enforceEmailVerification,
+        sendOnSignUp: deferredEmailVerification.sendOnSignUp,
         autoSignInAfterVerification: true,
         async sendVerificationEmail({ user, url, token }) {
           void sendVerificationEmail({ user, url, token });
@@ -441,7 +428,7 @@ function getAuth(): Auth {
           //      Auth refuses the invite once that many are pending.
           //   2. Per-org hourly rate — we count invitations created in the
           //      last hour and refuse with 429 before returning the cap.
-          // Together with required email verification and the 48h expiry,
+          // Together with send-time email verification and the 48h expiry,
           // this bounds how much mail one org can relay.
           invitationLimit: async ({ organization }) => {
             const windowStart = new Date(Date.now() - 60 * 60 * 1000);

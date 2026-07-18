@@ -4,7 +4,7 @@
  * Signups from disposable-mail providers are the entry point for abuse: they
  * give an attacker an unlimited supply of "verifiable" throwaway accounts. The
  * incident that motivated this used `vomomo6110@fishnone.com`. Blocking these
- * domains at account creation — together with required email verification —
+ * domains at account creation — together with send-time email verification —
  * removes the cheap-identity supply that makes email-relay abuse economical.
  *
  * This is intentionally a curated static list of the highest-volume providers

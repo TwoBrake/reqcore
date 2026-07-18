@@ -222,7 +222,7 @@ export async function sendCandidateMessageEmail(params: {
 
 /**
  * Send an email verification link.
- * Called by Better Auth when requireEmailVerification is enabled.
+ * Called by Better Auth after signup and for user-requested resends.
  * Not awaited by the caller (fire-and-forget) to prevent timing attacks.
  */
 export async function sendVerificationEmail(data: {

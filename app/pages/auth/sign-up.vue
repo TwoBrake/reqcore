@@ -19,10 +19,6 @@ const password = ref("");
 const confirmPassword = ref("");
 const error = ref("");
 const isLoading = ref(false);
-// When email verification is required, sign-up returns no session — we show a
-// "check your inbox" state instead of navigating into the (gated) app.
-const verificationSentTo = ref("");
-const resendState = ref<"idle" | "sending" | "sent">("idle");
 const localePath = useLocalePath();
 const { track } = useTrack();
 const { data: authProviders } = await useFetch('/api/auth/providers');
@@ -109,8 +105,8 @@ async function handleSignUp() {
 
     track("signup_submitted");
 
-    // callbackURL is where the verification link lands the user after
-    // auto-sign-in. Mirrors the post-sign-up destination below.
+    // Verification runs in the background; clicking its link returns the user
+    // to the same destination signup is about to open.
     const verificationCallbackURL = pendingInvitation.value
         ? localePath(`/auth/accept-invitation/${pendingInvitation.value}`)
         : onboardingCreateOrgPath();
@@ -141,11 +137,8 @@ async function handleSignUp() {
 
     clearNuxtData();
 
-    // Email verification is required, so sign-up creates no session (token is
-    // null). Show the "verify your email" state; the user continues by clicking
-    // the link, which auto-signs-in and lands on verificationCallbackURL.
     if (!result.data?.token) {
-        verificationSentTo.value = email.value;
+        error.value = "Your account was created, but sign-in could not be completed. Please sign in to continue.";
         isLoading.value = false;
         return;
     }
@@ -157,23 +150,6 @@ async function handleSignUp() {
         );
     } else {
         await navigateTo(onboardingCreateOrgPath());
-    }
-}
-
-async function handleResendVerification() {
-    if (resendState.value === "sending" || !verificationSentTo.value) return;
-    resendState.value = "sending";
-    const callbackURL = pendingInvitation.value
-        ? localePath(`/auth/accept-invitation/${pendingInvitation.value}`)
-        : onboardingCreateOrgPath();
-    try {
-        await authClient.sendVerificationEmail({
-            email: verificationSentTo.value,
-            callbackURL,
-        });
-        resendState.value = "sent";
-    } catch {
-        resendState.value = "idle";
     }
 }
 
@@ -224,51 +200,7 @@ async function handleSocialSignUp(providerId: string) {
 </script>
 
 <template>
-    <div v-if="verificationSentTo" class="flex flex-col gap-4">
-        <div class="mb-2">
-            <h2 class="text-2xl font-semibold tracking-tight text-surface-900 dark:text-surface-100">
-                Verify your email
-            </h2>
-            <p class="mt-1.5 text-sm text-surface-500 dark:text-surface-400">
-                We sent a verification link to
-                <span class="font-medium text-surface-900 dark:text-surface-100">{{ verificationSentTo }}</span>.
-                Click it to activate your account and continue.
-            </p>
-        </div>
-
-        <div
-            class="rounded-md border border-surface-200 dark:border-surface-800 bg-surface-50 dark:bg-surface-900 p-4 text-sm text-surface-600 dark:text-surface-400"
-        >
-            Didn't get it? Check your spam folder, or resend the link below. The
-            link expires after a short while.
-        </div>
-
-        <button
-            type="button"
-            :disabled="resendState === 'sending' || resendState === 'sent'"
-            class="px-4 py-2.5 bg-brand-600 text-white rounded-md text-sm font-medium cursor-pointer hover:bg-brand-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-            @click="handleResendVerification"
-        >
-            {{
-                resendState === "sending"
-                    ? "Resending…"
-                    : resendState === "sent"
-                      ? "Verification link resent"
-                      : "Resend verification link"
-            }}
-        </button>
-
-        <p class="text-center text-sm text-surface-500 dark:text-surface-400">
-            Already verified?
-            <NuxtLink
-                :to="$localePath('/auth/sign-in')"
-                class="text-brand-600 dark:text-brand-400 hover:underline"
-                >Sign in</NuxtLink
-            >
-        </p>
-    </div>
-
-    <form v-else class="flex flex-col gap-4" @submit.prevent="handleSignUp">
+    <form class="flex flex-col gap-4" @submit.prevent="handleSignUp">
         <div class="mb-2">
             <h2 class="text-2xl font-semibold tracking-tight text-surface-900 dark:text-surface-100">
                 Create your account

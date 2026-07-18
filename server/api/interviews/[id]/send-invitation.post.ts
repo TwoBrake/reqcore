@@ -6,6 +6,7 @@ import { sendInterviewConversationMessage } from '../../../utils/interview-conve
 /** Retry a failed proposal/update using the generated conversation message and ICS. */
 export default defineEventHandler(async (event) => {
   const session = await requirePermission(event, { interview: ['update'] })
+  assertEmailVerified(session.user)
   const orgId = session.session.activeOrganizationId
   const { id } = await getValidatedRouterParams(event, interviewIdParamSchema.parse)
 
