@@ -4,10 +4,13 @@ import { organization, genericOAuth } from "better-auth/plugins";
 import { sso } from "@better-auth/sso";
 import { stripe as stripePlugin } from "@better-auth/stripe";
 import Stripe from "stripe";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
+import { APIError } from "better-auth/api";
 import { ac, owner, admin, member } from "~~/shared/permissions";
 import { isBillingActionAllowed } from "~~/shared/billing";
-import { sendOrgInvitationEmail, sendPasswordResetEmail } from "./email";
+import { sendOrgInvitationEmail, sendPasswordResetEmail, sendVerificationEmail } from "./email";
+import { isDisposableEmailDomain } from "./disposable-email-domains";
+import { OUTBOUND_LIMITS } from "~~/shared/abuse-limits";
 import { getMissingStripeBillingVars, isStripeBillingConfigured } from "./env";
 import { buildStripePlans } from "./billing/stripe-plans";
 import { isDemoOrgId, isDemoAccountEmail } from "./demoOrg";
@@ -259,6 +262,16 @@ function resolveBetterAuthUrl(): string {
 function getAuth(): Auth {
   if (!_auth) {
     const baseURL = resolveBetterAuthUrl();
+
+    // Enforce email verification only in real (production) deployments — same
+    // convention as the built-in rate limiter below. E2E and local dev run
+    // without a mail provider, so gating a session on a clickable link there
+    // would break the suite and block developers; production always enforces it.
+    const enforceEmailVerification =
+      process.env.NODE_ENV === "production"
+      && !process.env.CI
+      && !process.env.GITHUB_ACTIONS;
+
     const stripeBillingConfigured = isStripeBillingConfigured(env);
     const missingStripeBillingVars = getMissingStripeBillingVars(env);
 
@@ -288,6 +301,13 @@ function getAuth(): Auth {
 
       emailAndPassword: {
         enabled: true,
+        // ── Require verified email before any session ────────────
+        // A verified session is the trust gate for every outbound side
+        // effect (invitations, candidate messages, interview invites).
+        // Without this, disposable-mail accounts got a full session
+        // instantly and used our email provider as a spam relay.
+        // Sign-in of an unverified user is refused and (re)sends the link.
+        requireEmailVerification: enforceEmailVerification,
         // Server-side password policy — prevents bypass via direct API calls.
         // Client-side validation (sign-up.vue) is UX only; this is the enforcement.
         minPasswordLength: 8,
@@ -295,6 +315,41 @@ function getAuth(): Auth {
         // Password reset via email.
         async sendResetPassword({ user, url, token }, request) {
           void sendPasswordResetEmail({ user, url, token });
+        },
+      },
+
+      // ── Email Verification ───────────────────────────────────
+      // Delivers the verification link (template lives in email.ts).
+      // Better Auth sends it automatically on sign-up and again on any
+      // sign-in attempt by an unverified user. autoSignInAfterVerification
+      // logs the user in when they click the link so the flow completes
+      // in one step.
+      emailVerification: {
+        sendOnSignUp: enforceEmailVerification,
+        autoSignInAfterVerification: true,
+        async sendVerificationEmail({ user, url, token }) {
+          void sendVerificationEmail({ user, url, token });
+        },
+      },
+
+      // ── Signup Abuse Guard ───────────────────────────────────
+      // Reject disposable/throwaway email domains before an account is
+      // created. Runs for every signup path (email/password, social,
+      // OIDC) because they all create a user row. This removes the
+      // cheap-identity supply that makes email-relay abuse economical.
+      databaseHooks: {
+        user: {
+          create: {
+            before: async (userToCreate) => {
+              if (isDisposableEmailDomain(userToCreate.email)) {
+                throw new APIError("BAD_REQUEST", {
+                  message:
+                    "Please sign up with a permanent email address. Disposable or temporary email domains aren't allowed.",
+                });
+              }
+              return { data: userToCreate };
+            },
+          },
         },
       },
 
@@ -374,7 +429,40 @@ function getAuth(): Auth {
             await sendOrgInvitationEmail(data, inviteLink);
           },
 
-          // ── Security Hardening ──────────────────────────────────
+          // ── Abuse Hardening ─────────────────────────────────────
+          // Cap organizations a single user can create. Blocks the
+          // "spin up throwaway orgs to reset per-org quotas" pattern
+          // seen in the invitation-spam incident. Joining more orgs via
+          // invitation is unaffected — this only limits creation.
+          organizationLimit: OUTBOUND_LIMITS.maxOrganizationsPerUser,
+
+          // Two caps on invitations, enforced when each invite is created:
+          //   1. Pending-per-org ceiling (the returned number) — Better
+          //      Auth refuses the invite once that many are pending.
+          //   2. Per-org hourly rate — we count invitations created in the
+          //      last hour and refuse with 429 before returning the cap.
+          // Together with required email verification and the 48h expiry,
+          // this bounds how much mail one org can relay.
+          invitationLimit: async ({ organization }) => {
+            const windowStart = new Date(Date.now() - 60 * 60 * 1000);
+            const [row] = await db
+              .select({ count: sql<number>`count(*)::int` })
+              .from(schema.invitation)
+              .where(
+                and(
+                  eq(schema.invitation.organizationId, organization.id),
+                  gte(schema.invitation.createdAt, windowStart),
+                ),
+              );
+            if ((row?.count ?? 0) >= OUTBOUND_LIMITS.orgInvitesPerHour) {
+              throw new APIError("TOO_MANY_REQUESTS", {
+                message:
+                  "This organization has sent too many invitations in the past hour. Please try again later.",
+              });
+            }
+            return OUTBOUND_LIMITS.pendingInvitesPerOrg;
+          },
+
           // Cancel stale invitations when a new one is sent to the same email.
           cancelPendingInvitationsOnReInvite: true,
           // 48 hours (default) — explicitly stated for auditability.

@@ -6,6 +6,7 @@ import {
   candidateMessageAttachment,
 } from '~~/server/database/schema'
 import { sendCandidateMessageEmail } from '~~/server/utils/email'
+import { assertOutboundMessageLimit } from '~~/server/utils/candidate-message-rate-limit'
 import { deleteFromS3, downloadFromS3, uploadToS3 } from '~~/server/utils/s3'
 import { FREE_PLAN_CANDIDATE_CONVERSATION_LIMIT } from '~~/shared/billing'
 import { CANDIDATE_MESSAGE_MAX_REQUEST_BYTES } from '~~/shared/candidate-messaging'
@@ -74,6 +75,13 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 409, statusMessage: 'Request ID has already been used' })
   }
   if (existing?.providerMessageId) return existing
+
+  // Abuse guard: cap outbound candidate emails per organization per rolling
+  // hour. Independent of the Free-tier conversation cap (which meters product
+  // usage) — this bounds how much mail one org can relay if a paid account is
+  // hijacked. Shared with interview invitations via the same counter. Runs
+  // after the idempotency check so retries don't consume budget.
+  await assertOutboundMessageLimit(orgId)
 
   const latestMessage = await db.query.candidateMessage.findFirst({
     where: eq(candidateMessage.conversationId, conversation.id),
@@ -238,11 +246,18 @@ async function readCandidateMessageRequest(event: Parameters<typeof getHeader>[0
     }
   }
 
-  // Reject oversized bodies from the declared Content-Length before
-  // readMultipartFormData buffers the whole request into memory. The per-file
-  // and total-size limits below still apply to the actual bytes.
+  // Bound how much we buffer into memory before readMultipartFormData reads the
+  // body. A finite Content-Length is required: Node frames the request body to
+  // exactly that many bytes, so validating the header here caps the actual
+  // buffered size. This also rejects chunked/Transfer-Encoding uploads that omit
+  // Content-Length — those would otherwise skip this guard and let the body grow
+  // unbounded in memory. The per-file and total-size limits below still apply to
+  // the actual bytes received.
   const declaredBytes = Number(getHeader(event, 'content-length'))
-  if (Number.isFinite(declaredBytes) && declaredBytes > CANDIDATE_MESSAGE_MAX_REQUEST_BYTES) {
+  if (!Number.isFinite(declaredBytes)) {
+    throw createError({ statusCode: 411, statusMessage: 'A Content-Length header is required for attachment uploads.' })
+  }
+  if (declaredBytes > CANDIDATE_MESSAGE_MAX_REQUEST_BYTES) {
     throw createError({ statusCode: 413, statusMessage: 'Attachments can be at most 20 MB in total.' })
   }
 
