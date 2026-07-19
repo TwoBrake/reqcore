@@ -1304,3 +1304,126 @@ export const careerPage = pgTable('career_page', {
 export const careerPageRelations = relations(careerPage, ({ one }) => ({
   organization: one(organization, { fields: [careerPage.organizationId], references: [organization.id] }),
 }))
+
+// ─────────────────────────────────────────────
+// Bulk Candidate Import
+// ─────────────────────────────────────────────
+//
+// The import pipeline is deliberately staged: an upload becomes an `importJob`
+// whose rows land in `importRow` as raw + normalized JSON. Nothing touches the
+// `candidate` table until the user reviews the preview and commits. Raw data is
+// never discarded, so re-mapping columns re-normalizes from source without a
+// re-upload, and a crashed commit is safely resumable (each row is idempotent
+// via `dedupeHash`). See PRODUCT.md → "Bulk import" for the wider design.
+
+export const importSourceEnum = pgEnum('import_source', [
+  // Tabular exports (columns exist, just mislabeled) share one normalizer.
+  'csv', 'xlsx',
+  // Unstructured resume dumps run through the resume-parser + AI-extract path.
+  'resume_zip',
+])
+
+export const importJobStatusEnum = pgEnum('import_job_status', [
+  // Rows are being parsed/normalized into staging.
+  'processing',
+  // Staged and classified; awaiting the user's mapping confirmation + commit.
+  'previewing',
+  // Commit in progress (ready rows being written to `candidate`).
+  'committing',
+  // All ready rows committed.
+  'completed',
+  // Unrecoverable job-level failure (bad file, parse crash).
+  'failed',
+])
+
+export const importRowStatusEnum = pgEnum('import_row_status', [
+  // Normalized and valid — will be created on commit.
+  'ready',
+  // Matches an existing candidate (by dedupeHash); commit policy decides fate.
+  'duplicate',
+  // A duplicate of an earlier row within this same file.
+  'duplicate_in_file',
+  // Failed validation (missing/invalid required fields); surfaced in preview.
+  'error',
+  // Written to `candidate` (or intentionally skipped) during commit.
+  'committed',
+  'skipped',
+])
+
+/**
+ * One bulk-import upload. Tracks progress and the confirmed column mapping so
+ * the job can be polled, resumed, and audited. `mapping` is a source-column →
+ * candidate-field map (null until the user confirms in the preview step).
+ */
+export const importJob = pgTable('import_job', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  createdBy: text('created_by').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  source: importSourceEnum('source').notNull(),
+  status: importJobStatusEnum('status').notNull().default('processing'),
+  /** Original uploaded filename, for display in the import history. */
+  filename: text('filename').notNull(),
+  /** Detected header columns from the source file (tabular sources). */
+  columns: jsonb('columns').$type<string[]>(),
+  /** Confirmed source-column → candidate-field mapping. NULL until confirmed. */
+  mapping: jsonb('mapping').$type<Record<string, string>>(),
+  /**
+   * When set, committed rows are also linked to this job as applications — i.e.
+   * "import these people as applicants to role X". NULL = add to the pool only.
+   */
+  targetJobId: text('target_job_id').references(() => job.id, { onDelete: 'set null' }),
+  totalRows: integer('total_rows').notNull().default(0),
+  /** Rows written during commit — drives the progress bar and resumability. */
+  committedRows: integer('committed_rows').notNull().default(0),
+  /** Populated when status = 'failed'. */
+  errorMessage: text('error_message'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (t) => ([
+  index('import_job_organization_id_idx').on(t.organizationId),
+  index('import_job_status_idx').on(t.organizationId, t.status),
+]))
+
+/**
+ * One candidate-to-be. `rawData` is the untouched source record (keyed by the
+ * file's own column names); `normalizedData` is the mapped candidate shape.
+ * `dedupeHash` (org + normalized email) makes commit idempotent and powers
+ * duplicate detection against both existing candidates and earlier rows.
+ */
+export const importRow = pgTable('import_row', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  jobId: text('job_id').notNull().references(() => importJob.id, { onDelete: 'cascade' }),
+  /** 0-based position in the source file, for stable ordering + error display. */
+  rowIndex: integer('row_index').notNull(),
+  rawData: jsonb('raw_data').$type<Record<string, string>>().notNull(),
+  normalizedData: jsonb('normalized_data').$type<Record<string, unknown>>(),
+  status: importRowStatusEnum('status').notNull().default('ready'),
+  /** Deterministic idempotency key: null when no email could be normalized. */
+  dedupeHash: text('dedupe_hash'),
+  /** Existing candidate this row matched, when status = 'duplicate'. */
+  matchedCandidateId: text('matched_candidate_id').references(() => candidate.id, { onDelete: 'set null' }),
+  /** Candidate created from this row, when status = 'committed'. */
+  createdCandidateId: text('created_candidate_id').references(() => candidate.id, { onDelete: 'set null' }),
+  /** Human-readable validation failure, when status = 'error'. */
+  errorMessage: text('error_message'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (t) => ([
+  index('import_row_job_id_idx').on(t.jobId),
+  index('import_row_job_status_idx').on(t.jobId, t.status),
+  index('import_row_dedupe_idx').on(t.organizationId, t.dedupeHash),
+]))
+
+export const importJobRelations = relations(importJob, ({ one, many }) => ({
+  organization: one(organization, { fields: [importJob.organizationId], references: [organization.id] }),
+  createdByUser: one(user, { fields: [importJob.createdBy], references: [user.id] }),
+  targetJob: one(job, { fields: [importJob.targetJobId], references: [job.id] }),
+  rows: many(importRow),
+}))
+
+export const importRowRelations = relations(importRow, ({ one }) => ({
+  organization: one(organization, { fields: [importRow.organizationId], references: [organization.id] }),
+  job: one(importJob, { fields: [importRow.jobId], references: [importJob.id] }),
+  matchedCandidate: one(candidate, { fields: [importRow.matchedCandidateId], references: [candidate.id] }),
+  createdCandidate: one(candidate, { fields: [importRow.createdCandidateId], references: [candidate.id] }),
+}))

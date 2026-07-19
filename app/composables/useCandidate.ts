@@ -1,4 +1,5 @@
 import type { MaybeRefOrGetter } from 'vue'
+import type { CandidateDetail } from '~~/shared/candidates'
 import { usePreviewReadOnly } from '~/composables/usePreviewReadOnly'
 
 /**
@@ -10,7 +11,7 @@ export function useCandidate(id: MaybeRefOrGetter<string>) {
   const { handlePreviewReadOnlyError } = usePreviewReadOnly()
   const candidateId = computed(() => toValue(id))
 
-  const { data: candidate, status, error, refresh } = useFetch(
+  const { data: candidate, status, error, refresh } = useFetch<CandidateDetail>(
     () => `/api/candidates/${candidateId.value}`,
     {
       key: computed(() => `candidate-${candidateId.value}`),

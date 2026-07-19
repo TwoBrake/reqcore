@@ -4,6 +4,7 @@ import {
   ExternalLink, Mail, Phone, Upload, Download, Eye, Trash2,
   ArrowLeft, AlertTriangle, Brain, History, RefreshCw,
 } from 'lucide-vue-next'
+import type { CandidateDetail } from '~~/shared/candidates'
 import { usePreviewReadOnly } from '~/composables/usePreviewReadOnly'
 
 const props = defineProps<{
@@ -63,7 +64,7 @@ const { data: application, status: fetchStatus, refresh } = useFetch(
 
 const candidateId = computed(() => application.value?.candidate?.id ?? null)
 
-const { data: candidateData, refresh: refreshCandidate } = useFetch(
+const { data: candidateData, refresh: refreshCandidate } = useFetch<CandidateDetail>(
   () => candidateId.value ? `/api/candidates/${candidateId.value}` : null!,
   {
     key: computed(() => `sidebar-candidate-${candidateId.value}`),
