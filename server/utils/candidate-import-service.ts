@@ -17,8 +17,6 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import {
   application,
   candidate,
-  document,
-  importAttachment,
   importJob,
   importRow,
   job,
@@ -37,7 +35,6 @@ import {
   type NormalizedPropertyValue,
   type PropertyTarget,
 } from './candidate-import'
-import { MAX_DOCUMENTS_PER_CANDIDATE } from './schemas/document'
 
 /** Insert rows in bounded chunks so a large file never builds one giant query. */
 const INSERT_CHUNK = 1_000
@@ -196,7 +193,7 @@ export async function summarizeJob(jobId: string): Promise<ImportSummary> {
 
 /** The full preview payload for the review screen. */
 export async function buildPreview(importJobRow: typeof importJob.$inferSelect) {
-  const [summary, sampleRows, targetJob, candidateProperties, attachments] = await Promise.all([
+  const [summary, sampleRows, targetJob, candidateProperties] = await Promise.all([
     summarizeJob(importJobRow.id),
     db.query.importRow.findMany({
       where: eq(importRow.jobId, importJobRow.id),
@@ -220,14 +217,6 @@ export async function buildPreview(importJobRow: typeof importJob.$inferSelect) 
         isNull(propertyDefinition.jobId),
       ),
       orderBy: (definition, { asc }) => [asc(definition.displayOrder), asc(definition.createdAt)],
-    }),
-    db.query.importAttachment.findMany({
-      where: and(
-        eq(importAttachment.importJobId, importJobRow.id),
-        eq(importAttachment.organizationId, importJobRow.organizationId),
-      ),
-      columns: { id: true, filename: true, mimeType: true, sizeBytes: true, documentId: true },
-      orderBy: (attachment, { asc }) => [asc(attachment.createdAt)],
     }),
   ])
   const propertyTypeSuggestions = Object.fromEntries(
@@ -259,7 +248,6 @@ export async function buildPreview(importJobRow: typeof importJob.$inferSelect) 
     propertyTypeSuggestions,
     summary,
     sampleRows,
-    attachments,
   }
 }
 
@@ -269,8 +257,6 @@ export interface CommitResult {
   skipped: number
   /** Applications created linking rows to the target job (0 when none set). */
   applied: number
-  /** Quarantined forwarded resumes promoted to candidate documents. */
-  documents: number
 }
 
 /**
@@ -292,7 +278,7 @@ export async function commitImport(params: {
   targetJobId?: string | null
 }): Promise<CommitResult> {
   const { orgId, jobId, duplicatePolicy, targetJobId } = params
-  const result: CommitResult = { created: 0, updated: 0, skipped: 0, applied: 0, documents: 0 }
+  const result: CommitResult = { created: 0, updated: 0, skipped: 0, applied: 0 }
 
   const candidatePropertyDefinitions = await db.query.propertyDefinition.findMany({
     where: and(
@@ -462,68 +448,6 @@ export async function commitImport(params: {
     await db.update(importJob)
       .set({ committedRows: sql`${importJob.committedRows} + ${batch.length}`, updatedAt: new Date() })
       .where(eq(importJob.id, jobId))
-  }
-
-  const sourceJob = await db.query.importJob.findFirst({
-    where: and(eq(importJob.id, jobId), eq(importJob.organizationId, orgId)),
-    columns: { source: true },
-  })
-  if (sourceJob?.source === 'email_forward') {
-    const [resolvedRow] = await db.query.importRow.findMany({
-      where: and(eq(importRow.jobId, jobId), eq(importRow.organizationId, orgId)),
-      orderBy: (row, { asc }) => [asc(row.rowIndex)],
-      limit: 1,
-      columns: { createdCandidateId: true, matchedCandidateId: true },
-    })
-    const candidateId = resolvedRow?.createdCandidateId ?? resolvedRow?.matchedCandidateId
-    if (candidateId) {
-      const existingDocuments = await db.query.document.findMany({
-        where: and(eq(document.candidateId, candidateId), eq(document.organizationId, orgId)),
-        columns: { id: true },
-      })
-      let availableSlots = Math.max(0, MAX_DOCUMENTS_PER_CANDIDATE - existingDocuments.length)
-      const attachments = await db.query.importAttachment.findMany({
-        where: and(
-          eq(importAttachment.importJobId, jobId),
-          eq(importAttachment.organizationId, orgId),
-          isNull(importAttachment.documentId),
-        ),
-        orderBy: (attachment, { asc }) => [asc(attachment.createdAt)],
-      })
-      for (const attachment of attachments) {
-        if (availableSlots <= 0) break
-        const documentId = crypto.randomUUID()
-        const insertedDocuments: Array<{ id: string }> = await db.insert(document).values({
-          id: documentId,
-          organizationId: orgId,
-          candidateId,
-          type: 'resume',
-          storageKey: attachment.storageKey,
-          originalFilename: attachment.filename,
-          mimeType: attachment.mimeType,
-          sizeBytes: attachment.sizeBytes,
-          parsedContent: attachment.parsedContent,
-        }).onConflictDoNothing({ target: document.storageKey }).returning({ id: document.id })
-        const insertedDocument = insertedDocuments[0]
-        const stored: { id: string; organizationId: string; candidateId: string } | undefined = insertedDocument
-          ? { id: insertedDocument.id, organizationId: orgId, candidateId }
-          : await db.query.document.findFirst({
-              where: eq(document.storageKey, attachment.storageKey),
-              columns: { id: true, organizationId: true, candidateId: true },
-            })
-        if (!stored || stored.organizationId !== orgId || stored.candidateId !== candidateId) {
-          throw new Error('Forwarded resume could not be attached safely')
-        }
-        await db.update(importAttachment).set({ documentId: stored.id }).where(and(
-          eq(importAttachment.id, attachment.id),
-          eq(importAttachment.organizationId, orgId),
-        ))
-        if (insertedDocument) {
-          result.documents++
-          availableSlots--
-        }
-      }
-    }
   }
 
   await db.update(importJob).set({ status: 'completed', updatedAt: new Date() }).where(eq(importJob.id, jobId))

@@ -1321,8 +1321,6 @@ export const importSourceEnum = pgEnum('import_source', [
   'csv', 'xlsx',
   // Unstructured resume dumps run through the resume-parser + AI-extract path.
   'resume_zip',
-  // A recruiter manually forwarded a candidate email to a per-job address.
-  'email_forward',
 ])
 
 export const importJobStatusEnum = pgEnum('import_job_status', [
@@ -1365,10 +1363,6 @@ export const importJob = pgTable('import_job', {
   status: importJobStatusEnum('status').notNull().default('processing'),
   /** Original uploaded filename, for display in the import history. */
   filename: text('filename').notNull(),
-  /** Resend inbound email identity. NULL for file-based imports. */
-  providerMessageId: text('provider_message_id').unique(),
-  /** Authenticated organization member who forwarded the source email. */
-  sourceSenderEmail: text('source_sender_email'),
   /** Detected header columns from the source file (tabular sources). */
   columns: jsonb('columns').$type<string[]>(),
   /** Confirmed source-column → candidate-field mapping. NULL until confirmed. */
@@ -1420,50 +1414,11 @@ export const importRow = pgTable('import_row', {
   index('import_row_dedupe_idx').on(t.organizationId, t.dedupeHash),
 ]))
 
-/**
- * A per-job forwarding address. The bearer token is encrypted so the UI can
- * display it, while inbound routing uses only its SHA-256 hash for lookup.
- */
-export const candidateForwardingAddress = pgTable('candidate_forwarding_address', {
-  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
-  jobId: text('job_id').notNull().references(() => job.id, { onDelete: 'cascade' }),
-  tokenHash: text('token_hash').notNull().unique(),
-  tokenEncrypted: text('token_encrypted').notNull(),
-  isEnabled: boolean('is_enabled').notNull().default(true),
-  createdBy: text('created_by').references(() => user.id, { onDelete: 'set null' }),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at').notNull().defaultNow(),
-}, (t) => ([
-  uniqueIndex('candidate_forwarding_address_job_id_idx').on(t.jobId),
-  index('candidate_forwarding_address_organization_id_idx').on(t.organizationId),
-]))
-
-/** Resume files remain quarantined here until the staged email import commits. */
-export const importAttachment = pgTable('import_attachment', {
-  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
-  importJobId: text('import_job_id').notNull().references(() => importJob.id, { onDelete: 'cascade' }),
-  providerAttachmentId: text('provider_attachment_id').notNull().unique(),
-  storageKey: text('storage_key').notNull().unique(),
-  filename: text('filename').notNull(),
-  mimeType: text('mime_type').notNull(),
-  sizeBytes: integer('size_bytes').notNull(),
-  parsedContent: jsonb('parsed_content').$type<Record<string, unknown>>(),
-  /** Set after commit; makes document creation replay-safe. */
-  documentId: text('document_id').references(() => document.id, { onDelete: 'set null' }),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-}, (t) => ([
-  index('import_attachment_organization_id_idx').on(t.organizationId),
-  index('import_attachment_job_id_idx').on(t.importJobId),
-]))
-
 export const importJobRelations = relations(importJob, ({ one, many }) => ({
   organization: one(organization, { fields: [importJob.organizationId], references: [organization.id] }),
   createdByUser: one(user, { fields: [importJob.createdBy], references: [user.id] }),
   targetJob: one(job, { fields: [importJob.targetJobId], references: [job.id] }),
   rows: many(importRow),
-  attachments: many(importAttachment),
 }))
 
 export const importRowRelations = relations(importRow, ({ one }) => ({
@@ -1471,16 +1426,4 @@ export const importRowRelations = relations(importRow, ({ one }) => ({
   job: one(importJob, { fields: [importRow.jobId], references: [importJob.id] }),
   matchedCandidate: one(candidate, { fields: [importRow.matchedCandidateId], references: [candidate.id] }),
   createdCandidate: one(candidate, { fields: [importRow.createdCandidateId], references: [candidate.id] }),
-}))
-
-export const candidateForwardingAddressRelations = relations(candidateForwardingAddress, ({ one }) => ({
-  organization: one(organization, { fields: [candidateForwardingAddress.organizationId], references: [organization.id] }),
-  job: one(job, { fields: [candidateForwardingAddress.jobId], references: [job.id] }),
-  createdByUser: one(user, { fields: [candidateForwardingAddress.createdBy], references: [user.id] }),
-}))
-
-export const importAttachmentRelations = relations(importAttachment, ({ one }) => ({
-  organization: one(organization, { fields: [importAttachment.organizationId], references: [organization.id] }),
-  importJob: one(importJob, { fields: [importAttachment.importJobId], references: [importJob.id] }),
-  document: one(document, { fields: [importAttachment.documentId], references: [document.id] }),
 }))

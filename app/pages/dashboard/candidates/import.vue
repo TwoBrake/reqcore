@@ -2,7 +2,6 @@
 import {
   ArrowLeft, UploadCloud, FileText, X, ArrowRight, CheckCircle2,
   AlertTriangle, XCircle, Copy, Loader2, PartyPopper, Briefcase,
-  Mail, Paperclip, Save,
 } from 'lucide-vue-next'
 import type { PropertyDefinition } from '~~/shared/properties'
 
@@ -13,7 +12,7 @@ definePageMeta({
 
 useSeoMeta({
   title: 'Import Candidates — Reqcore',
-  description: 'Import candidates from a CSV file or a forwarded email',
+  description: 'Import candidates from a CSV file',
 })
 
 const route = useRoute()
@@ -78,17 +77,10 @@ interface ImportPreview {
   propertyTypeSuggestions: Record<string, ImportablePropertyType>
   summary: ImportSummary
   sampleRows: SampleRow[]
-  attachments: Array<{
-    id: string
-    filename: string
-    mimeType: string
-    sizeBytes: number
-    documentId: string | null
-  }>
 }
 
 interface CommitResponse {
-  result: { created: number; updated: number; skipped: number; applied: number; documents: number }
+  result: { created: number; updated: number; skipped: number; applied: number }
   preview: ImportPreview
 }
 
@@ -134,7 +126,6 @@ const STEPS: { key: Step; label: string }[] = [
 const stepIndex = computed(() => STEPS.findIndex(s => s.key === step.value))
 
 const preview = ref<ImportPreview | null>(null)
-const forwardedDraft = ref({ name: '', email: '', phone: '', notes: '' })
 // Editable column → field map. '' means the column is ignored.
 const mapping = ref<Record<string, MappingTarget>>({})
 const newPropertyDrafts = ref<Record<string, { name: string; type: ImportablePropertyType }>>({})
@@ -149,15 +140,6 @@ function applyPreview(p: ImportPreview) {
   }
   mapping.value = next
   newPropertyDrafts.value = {}
-  if (p.job.source === 'email_forward') {
-    const raw = p.sampleRows[0]?.rawData
-    forwardedDraft.value = {
-      name: raw?.['Candidate name'] ?? '',
-      email: raw?.['Candidate email'] ?? '',
-      phone: raw?.Phone ?? '',
-      notes: raw?.Notes ?? '',
-    }
-  }
 }
 
 function apiError(err: unknown, fallback: string): string {
@@ -191,7 +173,7 @@ if (requestedImportId) {
   )
   if (requestedPreview.value) {
     applyPreview(requestedPreview.value)
-    step.value = requestedPreview.value.job.source === 'email_forward' ? 'review' : 'map'
+    step.value = 'map'
   }
   else if (requestedError.value) {
     uploadError.value = apiError(requestedError.value, 'Could not load this candidate import.')
@@ -326,20 +308,10 @@ async function confirmMapping() {
 // ── Step 3 · Review + commit ──────────────────────────────────────────────────
 
 const committing = ref(false)
-const savingForwarded = ref(false)
 
 const summary = computed(() => preview.value?.summary ?? null)
 const targetJob = computed(() => preview.value?.targetJob ?? null)
-const isEmailForward = computed(() => preview.value?.job.source === 'email_forward')
 const noun = computed(() => (targetJob.value ? 'applicant' : 'candidate'))
-const forwardedDirty = computed(() => {
-  if (!isEmailForward.value) return false
-  const raw = preview.value?.sampleRows[0]?.rawData
-  return forwardedDraft.value.name !== (raw?.['Candidate name'] ?? '')
-    || forwardedDraft.value.email !== (raw?.['Candidate email'] ?? '')
-    || forwardedDraft.value.phone !== (raw?.Phone ?? '')
-    || forwardedDraft.value.notes !== (raw?.Notes ?? '')
-})
 
 /** How many candidates the commit will write, given the chosen policy. */
 const willImport = computed(() => {
@@ -348,41 +320,12 @@ const willImport = computed(() => {
   return s.ready + (duplicatePolicy.value === 'update' || !!targetJob.value ? s.duplicate : 0)
 })
 
-async function saveForwardedCandidate(): Promise<boolean> {
-  if (!preview.value || !isEmailForward.value || savingForwarded.value) return false
-  savingForwarded.value = true
-  try {
-    const result = await $fetch<ImportPreview>(`/api/candidates/import/${preview.value.job.id}/row`, {
-      method: 'PATCH',
-      body: forwardedDraft.value,
-    })
-    applyPreview(result)
-    toast.success('Candidate details updated')
-    return true
-  }
-  catch (err) {
-    toast.error('Could not update candidate', { message: apiError(err, 'Please check the fields and try again.') })
-    return false
-  }
-  finally {
-    savingForwarded.value = false
-  }
-}
-
 function leaveReview() {
-  if (isEmailForward.value && targetJob.value) {
-    navigateTo(localePath(`/dashboard/jobs/${targetJob.value.id}/import`))
-    return
-  }
   step.value = 'map'
 }
 
 async function commit() {
   if (committing.value || !preview.value) return
-  if (forwardedDirty.value) {
-    const saved = await saveForwardedCandidate()
-    if (!saved || willImport.value === 0) return
-  }
   committing.value = true
   try {
     const res = await $fetch<CommitResponse>(
@@ -658,45 +601,6 @@ function rowName(row: SampleRow): string {
 
     <!-- ── Step 3 · Review ── -->
     <section v-else-if="step === 'review' && preview && summary">
-      <div
-        v-if="isEmailForward"
-        class="mb-6 border-b border-surface-200 pb-6 dark:border-surface-800"
-      >
-        <div class="mb-4 flex items-center gap-2">
-          <Mail class="size-4 text-brand-600 dark:text-brand-400" />
-          <h2 class="text-sm font-semibold text-surface-900 dark:text-surface-100">Forwarded candidate</h2>
-        </div>
-        <div class="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label for="forwarded-name" class="mb-1 block text-sm font-medium text-surface-700 dark:text-surface-300">Name</label>
-            <input id="forwarded-name" v-model="forwardedDraft.name" maxlength="200" class="w-full rounded-lg border border-surface-300 bg-white px-3 py-2 text-sm text-surface-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-surface-700 dark:bg-surface-900 dark:text-surface-100" />
-          </div>
-          <div>
-            <label for="forwarded-email" class="mb-1 block text-sm font-medium text-surface-700 dark:text-surface-300">Email</label>
-            <input id="forwarded-email" v-model="forwardedDraft.email" type="email" maxlength="255" class="w-full rounded-lg border border-surface-300 bg-white px-3 py-2 text-sm text-surface-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-surface-700 dark:bg-surface-900 dark:text-surface-100" />
-          </div>
-          <div>
-            <label for="forwarded-phone" class="mb-1 block text-sm font-medium text-surface-700 dark:text-surface-300">Phone</label>
-            <input id="forwarded-phone" v-model="forwardedDraft.phone" maxlength="50" class="w-full rounded-lg border border-surface-300 bg-white px-3 py-2 text-sm text-surface-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-surface-700 dark:bg-surface-900 dark:text-surface-100" />
-          </div>
-          <div>
-            <label for="forwarded-notes" class="mb-1 block text-sm font-medium text-surface-700 dark:text-surface-300">Notes</label>
-            <input id="forwarded-notes" v-model="forwardedDraft.notes" maxlength="1000" class="w-full rounded-lg border border-surface-300 bg-white px-3 py-2 text-sm text-surface-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-surface-700 dark:bg-surface-900 dark:text-surface-100" />
-          </div>
-        </div>
-        <div v-if="preview.attachments.length" class="mt-4 flex flex-wrap gap-2">
-          <span v-for="attachment in preview.attachments" :key="attachment.id" class="inline-flex items-center gap-1.5 rounded-md border border-surface-200 px-2.5 py-1.5 text-xs text-surface-600 dark:border-surface-700 dark:text-surface-300">
-            <Paperclip class="size-3.5" />
-            {{ attachment.filename }}
-          </span>
-        </div>
-        <button type="button" :disabled="savingForwarded" class="mt-4 inline-flex items-center gap-2 rounded-lg border border-surface-300 px-3 py-2 text-sm font-medium text-surface-700 hover:bg-surface-50 disabled:opacity-50 dark:border-surface-700 dark:text-surface-300 dark:hover:bg-surface-800" @click="saveForwardedCandidate">
-          <Loader2 v-if="savingForwarded" class="size-4 animate-spin" />
-          <Save v-else class="size-4" />
-          Save details
-        </button>
-      </div>
-
       <!-- Target job banner -->
       <div
         v-if="targetJob"
@@ -789,7 +693,7 @@ function rowName(row: SampleRow): string {
       <div class="mt-6 flex items-center gap-3">
         <button
           type="button"
-          :disabled="committing || savingForwarded || willImport === 0"
+          :disabled="committing || willImport === 0"
           class="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           @click="commit"
         >
@@ -802,7 +706,7 @@ function rowName(row: SampleRow): string {
           class="rounded-lg border border-surface-300 dark:border-surface-700 px-4 py-2 text-sm font-medium text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 disabled:opacity-50 transition-colors"
           @click="leaveReview"
         >
-          {{ isEmailForward ? 'Back to imports' : 'Back to mapping' }}
+          Back to mapping
         </button>
       </div>
     </section>

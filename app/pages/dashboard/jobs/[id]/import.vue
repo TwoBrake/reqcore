@@ -111,7 +111,7 @@ async function upload() {
       <header class="mb-8">
         <h1 class="text-2xl font-bold text-surface-900 dark:text-surface-50">Import candidates</h1>
         <p class="mt-1 text-sm text-surface-500 dark:text-surface-400">
-          Add candidates to <strong>{{ job.title }}</strong> from a CSV file or forwarded email.
+          Add candidates to <strong>{{ job.title }}</strong> from a CSV file.
         </p>
       </header>
 
@@ -175,8 +175,6 @@ async function upload() {
           <ArrowRight v-if="!uploading" class="size-4" />
         </button>
       </section>
-
-      <CandidateForwardingSettings :job-id="jobId" />
     </template>
   </div>
 </template>

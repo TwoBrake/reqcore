@@ -26,8 +26,7 @@ import {
   validateCandidateMessageAttachments,
   type ValidatedCandidateMessageAttachment,
 } from '../../utils/candidate-message-attachments'
-import { processCandidateForwardingEmail } from '../../utils/candidate-forwarding-service'
-import { requireCandidateForwardingConfig } from '../../utils/candidate-forwarding-config'
+import { requireCandidateMessagingConfig } from '../../utils/candidate-messaging-config'
 
 const STATUS_BY_EVENT = {
   'email.sent': 'sent',
@@ -39,7 +38,7 @@ const STATUS_BY_EVENT = {
 } as const
 
 export default defineEventHandler(async (event) => {
-  const { domain: replyDomain, webhookSecret } = requireCandidateForwardingConfig()
+  const { replyDomain, webhookSecret } = requireCandidateMessagingConfig()
   const payload = await readRawBody(event, 'utf8')
   const webhookId = getHeader(event, 'svix-id')
   const timestamp = getHeader(event, 'svix-timestamp')
@@ -80,8 +79,7 @@ export default defineEventHandler(async (event) => {
 
   try {
     if (verified.type === 'email.received') {
-      const handled = await processCandidateForwardingEmail(verified, replyDomain)
-      if (!handled) await processInboundMessage(verified, replyDomain)
+      await processInboundMessage(verified, replyDomain)
     } else if (verified.type in STATUS_BY_EVENT) {
       await processStatusEvent(verified as StatusWebhookEvent)
     }

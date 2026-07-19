@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowRight, Briefcase, Mail, Plus, UploadCloud } from 'lucide-vue-next'
+import { ArrowRight, Briefcase, Plus, UploadCloud } from 'lucide-vue-next'
 
 const localePath = useLocalePath()
 </script>
@@ -39,7 +39,7 @@ const localePath = useLocalePath()
         <div class="h-px flex-1 bg-surface-200 dark:bg-surface-800" />
       </div>
 
-      <div class="mx-auto grid max-w-lg gap-3 sm:grid-cols-2">
+      <div class="mx-auto max-w-lg">
         <NuxtLink
           :to="localePath('/dashboard/candidates/import')"
           class="flex min-w-0 items-start gap-3 rounded-lg border border-surface-200 bg-white p-4 text-left no-underline transition-colors hover:border-brand-300 hover:bg-surface-50 dark:border-surface-800 dark:bg-surface-900 dark:hover:border-brand-800 dark:hover:bg-surface-800/60"
@@ -50,19 +50,6 @@ const localePath = useLocalePath()
           <span class="min-w-0">
             <span class="block text-sm font-semibold text-surface-900 dark:text-surface-100">Import from file</span>
             <span class="mt-1 block text-xs leading-relaxed text-surface-500 dark:text-surface-400">Upload a CSV directly to the candidate pool.</span>
-          </span>
-        </NuxtLink>
-
-        <NuxtLink
-          :to="localePath({ path: '/dashboard/jobs/new', query: { afterCreate: 'email-forwarding' } })"
-          class="flex min-w-0 items-start gap-3 rounded-lg border border-surface-200 bg-white p-4 text-left no-underline transition-colors hover:border-brand-300 hover:bg-surface-50 dark:border-surface-800 dark:bg-surface-900 dark:hover:border-brand-800 dark:hover:bg-surface-800/60"
-        >
-          <span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-100 text-surface-600 dark:bg-surface-800 dark:text-surface-300">
-            <Mail class="size-4" />
-          </span>
-          <span class="min-w-0">
-            <span class="block text-sm font-semibold text-surface-900 dark:text-surface-100">Import by email</span>
-            <span class="mt-1 block text-xs leading-relaxed text-surface-500 dark:text-surface-400">Create the job first, then get its forwarding address.</span>
           </span>
         </NuxtLink>
       </div>

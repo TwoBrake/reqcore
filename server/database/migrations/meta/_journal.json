@@ -337,13 +337,6 @@
       "when": 1784465724426,
       "tag": "0047_marvelous_sunfire",
       "breakpoints": true
-    },
-    {
-      "idx": 48,
-      "version": "7",
-      "when": 1784470138479,
-      "tag": "0048_complex_earthquake",
-      "breakpoints": true
     }
   ]
 }
