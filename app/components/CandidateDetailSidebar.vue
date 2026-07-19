@@ -64,7 +64,7 @@ const { data: application, status: fetchStatus, refresh } = useFetch(
 const candidateId = computed(() => application.value?.candidate?.id ?? null)
 
 const { data: candidateData, refresh: refreshCandidate } = useFetch(
-  () => candidateId.value ? `/api/candidates/${candidateId.value}` : null!,
+  (): `/api/candidates/${string}` => candidateId.value ? `/api/candidates/${candidateId.value}` : null!,
   {
     key: computed(() => `sidebar-candidate-${candidateId.value}`),
     headers: useRequestHeaders(['cookie']),

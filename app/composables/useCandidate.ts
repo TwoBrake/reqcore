@@ -11,7 +11,7 @@ export function useCandidate(id: MaybeRefOrGetter<string>) {
   const candidateId = computed(() => toValue(id))
 
   const { data: candidate, status, error, refresh } = useFetch(
-    () => `/api/candidates/${candidateId.value}`,
+    (): `/api/candidates/${string}` => `/api/candidates/${candidateId.value}`,
     {
       key: computed(() => `candidate-${candidateId.value}`),
       headers: useRequestHeaders(['cookie']),
