@@ -32,4 +32,7 @@ export const saveOnboardingSurveySchema = z.object({
   answers: surveyAnswersSchema.default({}),
   plan: z.enum(['free', ...BILLING_PLAN_IDS]).optional(),
   billing: z.enum(['monthly', 'annual']).optional(),
+  // Per-answer saves send `false`; only the final step sends `true`. This is
+  // what flips completedAt from null to a timestamp in the upsert.
+  completed: z.boolean().default(false),
 })

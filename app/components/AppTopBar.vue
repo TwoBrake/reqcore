@@ -343,6 +343,14 @@ onUnmounted(() => {
             </Transition>
           </div>
 
+          <!-- Email verification pill (only while the signed-in user is unverified) -->
+          <ClientOnly>
+            <EmailVerificationPill
+              v-if="session?.user && !session.user.emailVerified"
+              :email="session.user.email"
+            />
+          </ClientOnly>
+
           <!-- Free-plan upgrade pill (hidden in demo, which has its own CTA) -->
           <ClientOnly>
             <FreePlanUpgradeMenu v-if="!isDemo" />

@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm'
 import { onboardingSurveyResponse } from '../../database/schema'
 import { saveOnboardingSurveySchema } from '../../utils/schemas/onboardingSurvey'
 import { SURVEY_QUESTIONS } from '../../../shared/onboarding-survey'
@@ -10,7 +11,8 @@ export default defineEventHandler(async (event) => {
 
   const answeredCount = Object.values(body.answers).filter(Boolean).length
   const skippedCount = SURVEY_QUESTIONS.length - answeredCount
-  const completedAt = new Date()
+  const now = new Date()
+  const completedAt = body.completed ? now : null
 
   const values = {
     userId,
@@ -25,7 +27,7 @@ export default defineEventHandler(async (event) => {
     answeredCount,
     skippedCount,
     completedAt,
-    updatedAt: completedAt,
+    updatedAt: now,
   }
 
   const [saved] = await db
@@ -33,7 +35,14 @@ export default defineEventHandler(async (event) => {
     .values(values)
     .onConflictDoUpdate({
       target: onboardingSurveyResponse.userId,
-      set: values,
+      set: {
+        ...values,
+        // A partial save must never wipe a completion that already landed
+        // (e.g. an in-flight per-answer POST arriving after finish()).
+        completedAt: body.completed
+          ? now
+          : sql`${onboardingSurveyResponse.completedAt}`,
+      },
     })
     .returning({
       id: onboardingSurveyResponse.id,
@@ -59,6 +68,7 @@ export default defineEventHandler(async (event) => {
   logApiRequest(event, session, 'onboarding_survey.saved', {
     answeredCount,
     skippedCount,
+    completed: body.completed,
   })
 
   return saved
