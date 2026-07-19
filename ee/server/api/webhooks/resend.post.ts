@@ -6,7 +6,7 @@ import {
   candidateMessageAttachment,
   candidateMessageWebhookEvent,
 } from '~~/server/database/schema'
-import { getResendClient, getResendReceivingClient } from '~~/server/utils/email'
+import { getResendReceivingClient } from '~~/server/utils/email'
 import { deleteFromS3, uploadToS3 } from '~~/server/utils/s3'
 import {
   CANDIDATE_MESSAGE_MAX_ATTACHMENT_BYTES,
@@ -20,13 +20,14 @@ import {
   normalizeEmailAddress,
   parseReferences,
 } from '../../utils/candidate-messaging'
-import { requireCandidateMessagingConfig } from '../../utils/candidate-messaging-config'
 import {
   CandidateMessageAttachmentError,
   shouldStoreInboundAttachment,
   validateCandidateMessageAttachments,
   type ValidatedCandidateMessageAttachment,
 } from '../../utils/candidate-message-attachments'
+import { processCandidateForwardingEmail } from '../../utils/candidate-forwarding-service'
+import { requireCandidateForwardingConfig } from '../../utils/candidate-forwarding-config'
 
 const STATUS_BY_EVENT = {
   'email.sent': 'sent',
@@ -38,7 +39,7 @@ const STATUS_BY_EVENT = {
 } as const
 
 export default defineEventHandler(async (event) => {
-  const { replyDomain, webhookSecret } = requireCandidateMessagingConfig()
+  const { domain: replyDomain, webhookSecret } = requireCandidateForwardingConfig()
   const payload = await readRawBody(event, 'utf8')
   const webhookId = getHeader(event, 'svix-id')
   const timestamp = getHeader(event, 'svix-timestamp')
@@ -47,8 +48,8 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Missing webhook payload or signature headers' })
   }
 
-  const resend = getResendClient()
-  if (!resend) throw createError({ statusCode: 503, statusMessage: 'Resend is not configured' })
+  const resend = getResendReceivingClient()
+  if (!resend) throw createError({ statusCode: 503, statusMessage: 'Resend Receiving is not configured' })
 
   let verified: WebhookEventPayload
   try {
@@ -79,7 +80,8 @@ export default defineEventHandler(async (event) => {
 
   try {
     if (verified.type === 'email.received') {
-      await processInboundMessage(verified, replyDomain)
+      const handled = await processCandidateForwardingEmail(verified, replyDomain)
+      if (!handled) await processInboundMessage(verified, replyDomain)
     } else if (verified.type in STATUS_BY_EVENT) {
       await processStatusEvent(verified as StatusWebhookEvent)
     }

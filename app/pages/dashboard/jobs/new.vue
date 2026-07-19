@@ -45,9 +45,11 @@ useSeoMeta({
 })
 
 const localePath = useLocalePath()
+const route = useRoute()
 const { createJob } = useJobs()
 const { track } = useTrack()
 const toast = useToast()
+const setupEmailForwarding = computed(() => route.query.afterCreate === 'email-forwarding')
 
 // Only owners/admins can change billing — drives the upgrade CTA in the
 // active-role limit upsell modal (server enforces this too).
@@ -732,6 +734,13 @@ async function handleSubmit(mode: 'publish' | 'draft' = publishChoice.value) {
 
     track('job_created')
 
+    if (setupEmailForwarding.value && created?.id) {
+      track('candidate_email_import_job_created')
+      clearFormStorage()
+      await navigateTo(`${localePath(`/dashboard/jobs/${created.id}/import`)}#candidate-forwarding`)
+      return
+    }
+
     if (mode === 'publish' && created?.id) {
       // Build the real application link
       const base = `${requestUrl.protocol}//${requestUrl.host}`
@@ -868,6 +877,17 @@ const typeOptions = [
         >
           Save &amp; exit
         </button>
+      </div>
+    </div>
+
+    <div
+      v-if="setupEmailForwarding && !isPublished"
+      class="mb-4 flex items-start gap-3 rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-brand-800 dark:border-brand-900 dark:bg-brand-950/30 dark:text-brand-200"
+    >
+      <Mail class="mt-0.5 size-4 shrink-0" />
+      <div>
+        <p class="text-sm font-medium">Create a job before importing candidates by email</p>
+        <p class="mt-0.5 text-xs leading-relaxed text-brand-700 dark:text-brand-300">After saving this job, you will go directly to its secure forwarding address.</p>
       </div>
     </div>
 

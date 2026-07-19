@@ -323,6 +323,27 @@
       "when": 1784446636483,
       "tag": "0045_sour_inertia",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1784463916079,
+      "tag": "0046_modern_stingray",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1784465724426,
+      "tag": "0047_marvelous_sunfire",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1784470138479,
+      "tag": "0048_complex_earthquake",
+      "breakpoints": true
     }
   ]
 }
