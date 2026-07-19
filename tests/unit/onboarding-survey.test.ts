@@ -58,6 +58,25 @@ describe('onboarding survey config', () => {
     expect(result.success).toBe(true)
   })
 
+  it('defaults an incremental save to not-completed', () => {
+    // Per-answer saves omit `completed`; only the final step sends true. This
+    // default is what keeps partial rows marked in-progress.
+    const result = saveOnboardingSurveySchema.parse({
+      answers: { company_size: 'solo' },
+    })
+
+    expect(result.completed).toBe(false)
+  })
+
+  it('accepts an explicit completion flag on the final save', () => {
+    const result = saveOnboardingSurveySchema.parse({
+      answers: { company_size: 'solo' },
+      completed: true,
+    })
+
+    expect(result.completed).toBe(true)
+  })
+
   it('rejects unknown questions and invalid option values before persistence', () => {
     expect(saveOnboardingSurveySchema.safeParse({
       answers: {

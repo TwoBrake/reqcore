@@ -65,7 +65,10 @@ export const onboardingSurveyResponse = pgTable('onboarding_survey_response', {
   expectedRoles12m: text('expected_roles_12m'),
   answeredCount: integer('answered_count').notNull().default(0),
   skippedCount: integer('skipped_count').notNull().default(0),
-  completedAt: timestamp('completed_at').notNull().defaultNow(),
+  // Null while the survey is still in progress (partial rows are saved per
+  // answer). Set once, when the user reaches the final step — this is the
+  // source of truth for "did they finish the survey?".
+  completedAt: timestamp('completed_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (t) => ([
