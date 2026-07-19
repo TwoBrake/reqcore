@@ -136,7 +136,7 @@ async function upload() {
             <UploadCloud class="mx-auto size-10 text-surface-400" />
             <p class="mt-3 text-sm text-surface-700 dark:text-surface-300">
               Drag a CSV here, or
-              <button type="button" class="font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400" @click="fileInput?.click()">
+              <button type="button" class="cursor-pointer font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400" @click="fileInput?.click()">
                 browse to upload
               </button>
             </p>
@@ -151,7 +151,7 @@ async function upload() {
             </div>
             <button
               type="button"
-              class="flex size-8 shrink-0 items-center justify-center rounded-lg text-surface-400 hover:bg-surface-100 hover:text-surface-600 dark:hover:bg-surface-800"
+              class="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-surface-400 hover:bg-surface-100 hover:text-surface-600 dark:hover:bg-surface-800"
               title="Remove file"
               @click="clearFile"
             >
@@ -167,7 +167,7 @@ async function upload() {
         <button
           type="button"
           :disabled="!file || uploading"
-          class="mt-5 inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+          class="mt-5 inline-flex cursor-pointer items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
           @click="upload"
         >
           <Loader2 v-if="uploading" class="size-4 animate-spin" />
