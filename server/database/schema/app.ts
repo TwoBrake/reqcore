@@ -944,6 +944,104 @@ export const analysisRun = pgTable('analysis_run', {
 ]))
 
 // ─────────────────────────────────────────────
+// Recruiter Notifications (outbox + preferences + suppression)
+// ─────────────────────────────────────────────
+//
+// Reliable, long-term recruiter notification engine. Domain events are written
+// to `notificationOutbox` (ideally in the same tx as the triggering write so an
+// event is never lost), and a scheduled worker drains it, sends via Resend, and
+// retries with backoff. See server/utils/notifications/.
+
+/** The three v1 recruiter-facing events. New producers plug into the same engine. */
+export const notificationTypeEnum = pgEnum('notification_type', [
+  'candidate_replied', 'application_created', 'analysis_completed',
+])
+/** How a single outbox row is delivered — immediately, or rolled into a daily digest. */
+export const notificationCadenceEnum = pgEnum('notification_cadence', ['instant', 'digest'])
+/** Per-recipient, per-type choice. `off` suppresses the event entirely for that user. */
+export const notificationChannelModeEnum = pgEnum('notification_channel_mode', ['instant', 'digest', 'off'])
+/** Outbox lifecycle: pending → sent | skipped | dead (past max retries). */
+export const notificationOutboxStatusEnum = pgEnum('notification_outbox_status', [
+  'pending', 'sent', 'skipped', 'dead',
+])
+/** Why an address was suppressed — a hard bounce or a spam complaint. */
+export const emailSuppressionReasonEnum = pgEnum('email_suppression_reason', ['bounce', 'complaint'])
+
+/**
+ * Durable, at-least-once notification queue. One row per recipient per event.
+ *
+ * `dedupeKey` is `<event-scoped key>:<recipientUserId>` so re-enqueuing the same
+ * event is a no-op (unique index + onConflictDoNothing), while distinct recipients
+ * each get their own row. The worker pulls `status='pending'` rows whose
+ * `nextAttemptAt` has elapsed; `providerMessageId` links Resend delivery webhooks
+ * back to the row.
+ */
+export const notificationOutbox = pgTable('notification_outbox', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  recipientUserId: text('recipient_user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  recipientEmail: text('recipient_email').notNull(),
+  type: notificationTypeEnum('type').notNull(),
+  cadence: notificationCadenceEnum('cadence').notNull(),
+  /** Idempotency key: `<event key>:<recipientUserId>`. Globally unique. */
+  dedupeKey: text('dedupe_key').notNull(),
+  /** Rendering context for the template (candidate name, job title, deep-link ids, …). */
+  payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+  status: notificationOutboxStatusEnum('status').notNull().default('pending'),
+  attempts: integer('attempts').notNull().default(0),
+  nextAttemptAt: timestamp('next_attempt_at').notNull().defaultNow(),
+  /** Digest grouping key (YYYY-MM-DD, recipient timezone-agnostic v1). NULL for instant rows. */
+  digestBucket: text('digest_bucket'),
+  /** Resend message id — set on send, used by the delivery webhook to update status. */
+  providerMessageId: text('provider_message_id'),
+  sentAt: timestamp('sent_at'),
+  failedAt: timestamp('failed_at'),
+  lastError: text('last_error'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (t) => ([
+  uniqueIndex('notification_outbox_dedupe_key_idx').on(t.dedupeKey),
+  // Drives cadence-specific pending-row pulls without indexing terminal rows.
+  index('notification_outbox_pull_idx').on(t.cadence, t.nextAttemptAt)
+    .where(sql`${t.status} = 'pending'`),
+  // Webhook lookup by provider message id (partial: only rows that have been sent).
+  uniqueIndex('notification_outbox_provider_id_idx').on(t.providerMessageId).where(sql`${t.providerMessageId} is not null`),
+  index('notification_outbox_organization_id_idx').on(t.organizationId),
+  index('notification_outbox_digest_idx').on(t.organizationId, t.recipientUserId, t.digestBucket),
+]))
+
+/**
+ * Per-recipient, per-type delivery preference. Absent row = the sensible default
+ * resolved in code (candidate_replied/analysis_completed → instant,
+ * application_created → digest). See server/utils/notifications/recipients.ts.
+ */
+export const notificationPreference = pgTable('notification_preference', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  type: notificationTypeEnum('type').notNull(),
+  channelMode: notificationChannelModeEnum('channel_mode').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (t) => ([
+  uniqueIndex('notification_preference_user_org_type_idx').on(t.userId, t.organizationId, t.type),
+  index('notification_preference_organization_id_idx').on(t.organizationId),
+]))
+
+/**
+ * Addresses we must never send to again. Fed by hard-bounce / complaint webhooks
+ * and checked at recipient resolution — protects long-term sender reputation.
+ */
+export const emailSuppression = pgTable('email_suppression', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  email: text('email').notNull(),
+  reason: emailSuppressionReasonEnum('reason').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (t) => ([
+  uniqueIndex('email_suppression_email_idx').on(sql`lower(${t.email})`),
+]))
+
+// ─────────────────────────────────────────────
 // Relations
 // ─────────────────────────────────────────────
 

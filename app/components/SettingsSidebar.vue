@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
 import {
-  Building2, Users, UserCircle, ChevronLeft, Settings, Plug, Brain, ShieldCheck, Globe, Globe2, ShieldAlert, CreditCard, Lock,
+  Building2, Users, UserCircle, ChevronLeft, Settings, Plug, Brain, ShieldCheck, Globe, Globe2, ShieldAlert, CreditCard, Lock, Bell,
 } from 'lucide-vue-next'
 import type { PlanFeature } from '~~/shared/billing'
 
@@ -9,6 +9,7 @@ const route = useRoute()
 const localePath = useLocalePath()
 const { t } = useI18n()
 const { hasFeature } = usePlanFeature()
+const notificationsEnabled = useFeatureFlagEnabled('notifications')
 
 /** Show a lock hint when the org's plan can't use a nav item's feature. */
 function isLocked(feature?: PlanFeature) {
@@ -39,6 +40,13 @@ const settingsNav: SettingsNavItem[] = [
     description: 'Names & date formats',
     to: '/dashboard/settings/localization',
     icon: Globe,
+    exact: true,
+  },
+  {
+    label: 'Notifications',
+    description: 'Email alerts & digest',
+    to: '/dashboard/settings/notifications',
+    icon: Bell,
     exact: true,
   },
   {
@@ -105,6 +113,10 @@ const settingsNav: SettingsNavItem[] = [
   },
 ]
 
+const visibleSettingsNav = computed(() => settingsNav.filter(item =>
+  item.to !== '/dashboard/settings/notifications' || notificationsEnabled.value,
+))
+
 function isActive(to: string, exact: boolean) {
   const localizedTo = localePath(to)
   if (exact) return route.path === localizedTo
@@ -139,7 +151,7 @@ function isActive(to: string, exact: boolean) {
     <nav class="flex-1 px-3 pb-5">
       <div class="flex flex-col gap-0.5">
         <NuxtLink
-          v-for="item in settingsNav"
+          v-for="item in visibleSettingsNav"
           :key="item.to"
           :to="$localePath(item.to)"
           class="group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all no-underline"

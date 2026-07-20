@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import {
-  Building2, Users, UserCircle, ChevronLeft, Plug, Brain, ShieldCheck, Globe, Globe2, CreditCard,
+  Building2, Users, UserCircle, ChevronLeft, Plug, Brain, ShieldCheck, Globe, Globe2, CreditCard, Bell,
 } from 'lucide-vue-next'
 
 const route = useRoute()
 const localePath = useLocalePath()
+const notificationsEnabled = useFeatureFlagEnabled('notifications')
 
 const settingsNav = [
   {
@@ -17,6 +18,12 @@ const settingsNav = [
     label: 'Localization',
     to: '/dashboard/settings/localization',
     icon: Globe,
+    exact: true,
+  },
+  {
+    label: 'Notifications',
+    to: '/dashboard/settings/notifications',
+    icon: Bell,
     exact: true,
   },
   {
@@ -63,6 +70,10 @@ const settingsNav = [
   },
 ]
 
+const visibleSettingsNav = computed(() => settingsNav.filter(item =>
+  item.to !== '/dashboard/settings/notifications' || notificationsEnabled.value,
+))
+
 function isActive(to: string, exact: boolean) {
   const localizedTo = localePath(to)
   if (exact) return route.path === localizedTo
@@ -89,7 +100,7 @@ function isActive(to: string, exact: boolean) {
     <!-- Scrollable tabs -->
     <nav class="flex overflow-x-auto px-3 gap-1 pb-2 scrollbar-none">
       <NuxtLink
-        v-for="item in settingsNav"
+        v-for="item in visibleSettingsNav"
         :key="item.to"
         :to="$localePath(item.to)"
         class="flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium transition-colors no-underline shrink-0"

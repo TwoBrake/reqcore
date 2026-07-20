@@ -53,6 +53,16 @@ export const FEATURE_FLAGS = {
     defaultValue: false,
     description: 'New AI chatbot experience in the dashboard.',
   },
+  /**
+   * Recruiter notification engine (outbox + digests). On by default everywhere,
+   * including self-host — it's a core activation driver. Kept as a flag for
+   * gradual cloud rollout and a fast client-visible kill-switch; the
+   * NOTIFICATIONS_ENABLED env var is the server-side worker kill-switch.
+   */
+  'notifications': {
+    defaultValue: true,
+    description: 'Recruiter email notifications (new applicant, reply, AI scoring) + daily digest.',
+  },
 } as const satisfies Record<string, FeatureFlagDefinition>
 
 export type FeatureFlagKey = keyof typeof FEATURE_FLAGS

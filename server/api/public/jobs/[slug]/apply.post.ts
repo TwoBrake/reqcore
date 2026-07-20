@@ -13,6 +13,7 @@ import {
   sanitizeFilename,
 } from '../../../../utils/schemas/document'
 import { restoreCandidateForPublicApplication } from '../../../../utils/candidate-retention'
+import { enqueueNotification } from '../../../../utils/notifications/enqueue'
 
 /** Rate limit: max 5 applications per IP per 15 minutes */
 const applyRateLimit = createRateLimiter({
@@ -182,6 +183,7 @@ export default defineEventHandler(async (event) => {
     columns: {
       id: true,
       organizationId: true,
+      title: true,
       phoneRequirement: true,
       requireResume: true,
       requireCoverLetter: true,
@@ -417,13 +419,31 @@ export default defineEventHandler(async (event) => {
   // 8. Create application
   // ─────────────────────────────────────────────
 
-  const [newApplication] = await db.insert(application).values({
-    organizationId: orgId,
-    candidateId,
-    jobId,
-    status: 'new',
-    coverLetterText: coverLetterText || null,
-  }).returning({ id: application.id })
+  const [newApplication] = await db.transaction(async (tx) => {
+    const inserted = await tx.insert(application).values({
+      organizationId: orgId,
+      candidateId,
+      jobId,
+      status: 'new',
+      coverLetterText: coverLetterText || null,
+    }).returning({ id: application.id })
+
+    const row = inserted[0]
+    if (row) {
+      await enqueueNotification({
+        organizationId: orgId,
+        type: 'application_created',
+        dedupeKey: `application_created:${row.id}`,
+        payload: {
+          applicationId: row.id,
+          candidateName: `${firstName} ${lastName}`.trim(),
+          jobTitle: existingJob.title,
+        },
+        tx,
+      })
+    }
+    return inserted
+  })
 
   // ─────────────────────────────────────────────
   // 8b. Record source attribution

@@ -16,6 +16,7 @@ import { computeCostUsdMicros } from './pricing'
 import { captureAiGeneration } from './observability'
 import { extractResumeText } from '../resume-parser'
 import { fetchScreeningAnswers, DEFAULT_ANALYSIS_CONTEXT } from './analysisContext'
+import { enqueueNotification } from '../notifications/enqueue'
 
 export async function autoScoreApplication(applicationId: string, orgId: string) {
   const app = await db.query.application.findFirst({
@@ -142,7 +143,7 @@ export async function autoScoreApplication(applicationId: string, orgId: string)
       .set({ score: compositeScore, updatedAt: new Date() })
       .where(eq(application.id, applicationId))
 
-    return tx.insert(analysisRun).values({
+    const inserted = await tx.insert(analysisRun).values({
       organizationId: orgId,
       applicationId,
       status: 'completed',
@@ -155,6 +156,24 @@ export async function autoScoreApplication(applicationId: string, orgId: string)
       completionTokens: result.usage.completionTokens,
       costUsdMicros,
     }).returning({ id: analysisRun.id })
+
+    // Enqueue in the same tx so the notification is never lost if the run commits.
+    const runRow = inserted[0]
+    if (runRow) {
+      await enqueueNotification({
+        organizationId: orgId,
+        type: 'analysis_completed',
+        dedupeKey: `analysis_completed:${runRow.id}`,
+        payload: {
+          applicationId,
+          candidateName: `${app.candidate.firstName} ${app.candidate.lastName}`.trim(),
+          jobTitle: app.job.title,
+          compositeScore,
+        },
+        tx,
+      })
+    }
+    return inserted
   })
 
   captureAiGeneration({

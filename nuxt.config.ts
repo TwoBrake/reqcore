@@ -298,9 +298,13 @@ export default defineNuxtConfig({
       tasks: true,
     },
     scheduledTasks: {
+      // Every minute: drain the recruiter notification outbox (instant cadence).
+      "* * * * *": ["notification-dispatch"],
       // Daily at 03:00 UTC. External cron remains supported for platforms that
       // suspend long-running processes or do not execute Nitro task timers.
       "0 3 * * *": ["retention-cleanup"],
+      // Daily at 08:00 UTC: roll up digest-cadence notifications per recipient.
+      "0 8 * * *": ["notification-digest"],
     },
     routeRules: {
       "/**": {
