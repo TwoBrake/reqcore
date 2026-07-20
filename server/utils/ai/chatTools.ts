@@ -12,7 +12,7 @@
  * `list_*` to discover IDs, then `get_*` to fetch details.
  */
 import { tool } from 'ai'
-import { and, desc, eq, ilike, inArray, or } from 'drizzle-orm'
+import { and, desc, eq, ilike, inArray, isNull, or } from 'drizzle-orm'
 import { z } from 'zod'
 import {
   application,
@@ -62,6 +62,11 @@ function truncate(text: string, max: number): string {
 }
 
 export function buildChatbotTools(ctx: ChatbotToolContext) {
+  const activeCandidateIds = db.select({ id: candidate.id }).from(candidate).where(and(
+    eq(candidate.organizationId, ctx.orgId),
+    isNull(candidate.quarantinedAt),
+  ))
+
   return {
     list_jobs: tool({
       description:
@@ -157,6 +162,7 @@ export function buildChatbotTools(ctx: ChatbotToolContext) {
         const conditions = [
           eq(application.organizationId, ctx.orgId),
           eq(application.jobId, jobId),
+          inArray(application.candidateId, activeCandidateIds),
         ]
         if (status) conditions.push(eq(application.status, status))
 
@@ -195,6 +201,7 @@ export function buildChatbotTools(ctx: ChatbotToolContext) {
         const rows = await db.query.candidate.findMany({
           where: and(
             eq(candidate.organizationId, ctx.orgId),
+            isNull(candidate.quarantinedAt),
             or(
               ilike(candidate.firstName, like),
               ilike(candidate.lastName, like),
@@ -250,6 +257,7 @@ export function buildChatbotTools(ctx: ChatbotToolContext) {
           where: and(
             eq(candidate.organizationId, ctx.orgId),
             eq(candidate.id, candidateId),
+            isNull(candidate.quarantinedAt),
           ),
         })
         if (!c) throw new Error(`Candidate ${candidateId} not found.`)
@@ -345,6 +353,7 @@ export function buildChatbotTools(ctx: ChatbotToolContext) {
           where: and(
             eq(document.organizationId, ctx.orgId),
             eq(document.id, documentId),
+            inArray(document.candidateId, activeCandidateIds),
           ),
         })
         if (!doc) throw new Error(`Document ${documentId} not found.`)
@@ -398,6 +407,7 @@ export function buildChatbotTools(ctx: ChatbotToolContext) {
           where: and(
             eq(application.organizationId, ctx.orgId),
             eq(application.id, applicationId),
+            inArray(application.candidateId, activeCandidateIds),
           ),
           columns: { id: true, score: true, jobId: true },
         })

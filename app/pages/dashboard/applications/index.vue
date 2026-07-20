@@ -367,6 +367,11 @@ function getPropertyValue(entity: { properties?: import('~~/shared/properties').
 
 // ── Application detail drawer ─────────────────────────────────────────────────
 const selectedApplicationId = ref<string | null>(null)
+
+async function handleApplicationDeleted() {
+  selectedApplicationId.value = null
+  await refresh()
+}
 </script>
 
 <template>
@@ -777,5 +782,6 @@ const selectedApplicationId = ref<string | null>(null)
     v-if="selectedApplicationId"
     :application-id="selectedApplicationId"
     @close="selectedApplicationId = null"
+    @deleted="handleApplicationDeleted"
   />
 </template>

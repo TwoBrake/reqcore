@@ -1,5 +1,5 @@
-import { eq, and } from 'drizzle-orm'
-import { application } from '../../database/schema'
+import { eq, and, inArray, isNull } from 'drizzle-orm'
+import { application, candidate } from '../../database/schema'
 import { applicationIdParamSchema } from '../../utils/schemas/application'
 import { loadPropertyEntriesForEntity } from '../../utils/properties'
 
@@ -12,9 +12,17 @@ export default defineEventHandler(async (event) => {
   const orgId = session.session.activeOrganizationId
 
   const { id } = await getValidatedRouterParams(event, applicationIdParamSchema.parse)
+  const activeCandidateIds = db.select({ id: candidate.id }).from(candidate).where(and(
+    eq(candidate.organizationId, orgId),
+    isNull(candidate.quarantinedAt),
+  ))
 
   const result = await db.query.application.findFirst({
-    where: and(eq(application.id, id), eq(application.organizationId, orgId)),
+    where: and(
+      eq(application.id, id),
+      eq(application.organizationId, orgId),
+      inArray(application.candidateId, activeCandidateIds),
+    ),
     with: {
       candidate: {
         columns: { id: true, firstName: true, lastName: true, email: true, phone: true },

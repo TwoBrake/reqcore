@@ -1,5 +1,5 @@
-import { eq, and, desc, count, inArray } from 'drizzle-orm'
-import { job, application } from '../../database/schema'
+import { eq, and, desc, count, inArray, isNull } from 'drizzle-orm'
+import { job, application, candidate } from '../../database/schema'
 import { jobQuerySchema } from '../../utils/schemas/job'
 
 interface PipelineCounts {
@@ -49,6 +49,10 @@ export default defineEventHandler(async (event) => {
   let pipelineMap: Record<string, PipelineCounts> = {}
 
   if (jobIds.length > 0) {
+    const activeCandidateIds = db.select({ id: candidate.id }).from(candidate).where(and(
+      eq(candidate.organizationId, orgId),
+      isNull(candidate.quarantinedAt),
+    ))
     const pipelineRows = await db
       .select({
         jobId: application.jobId,
@@ -59,6 +63,7 @@ export default defineEventHandler(async (event) => {
       .where(and(
         eq(application.organizationId, orgId),
         inArray(application.jobId, jobIds),
+        inArray(application.candidateId, activeCandidateIds),
       ))
       .groupBy(application.jobId, application.status)
 

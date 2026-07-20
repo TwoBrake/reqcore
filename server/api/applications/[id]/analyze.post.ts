@@ -1,6 +1,6 @@
-import { eq, and } from 'drizzle-orm'
+import { eq, and, inArray, isNull } from 'drizzle-orm'
 import {
-  application, scoringCriterion, criterionScore,
+  application, candidate, scoringCriterion, criterionScore,
   analysisRun, document,
 } from '../../../database/schema'
 import { scoreApplication, computeCompositeScore, hasScorableCandidateMaterial } from '../../../utils/ai/scoring'
@@ -35,10 +35,18 @@ export default defineEventHandler(async (event) => {
   // Body is optional — GET-style "just run with defaults" stays valid.
   const body = await readBody(event).catch(() => null)
   const parsedBody = body ? bodySchema.parse(body) : null
+  const activeCandidateIds = db.select({ id: candidate.id }).from(candidate).where(and(
+    eq(candidate.organizationId, orgId),
+    isNull(candidate.quarantinedAt),
+  ))
 
   // Fetch application with candidate, job, and documents
   const app = await db.query.application.findFirst({
-    where: and(eq(application.id, applicationId), eq(application.organizationId, orgId)),
+    where: and(
+      eq(application.id, applicationId),
+      eq(application.organizationId, orgId),
+      inArray(application.candidateId, activeCandidateIds),
+    ),
     with: {
       candidate: {
         columns: { id: true, firstName: true, lastName: true },

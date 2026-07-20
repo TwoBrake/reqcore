@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { X, ExternalLink, User, Briefcase, Calendar, Clock, Hash, FileText, MessageSquare } from 'lucide-vue-next'
+import { X, ExternalLink, User, Briefcase, Calendar, Clock, Hash, FileText, MessageSquare, Trash2 } from 'lucide-vue-next'
 import { APPLICATION_STATUS_TRANSITIONS } from '~~/shared/status-transitions'
 import { usePreviewReadOnly } from '~/composables/usePreviewReadOnly'
 
@@ -9,13 +9,14 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: []
+  deleted: []
 }>()
 
 const localePath = useLocalePath()
 const { handlePreviewReadOnlyError } = usePreviewReadOnly()
 const toast = useToast()
 
-const { application, status: fetchStatus, error, refresh, updateApplication } = useApplication(() => props.applicationId)
+const { application, status: fetchStatus, error, refresh, updateApplication, deleteApplication } = useApplication(() => props.applicationId)
 const { formatCandidateName } = useOrgSettings()
 
 // ─── Status transitions ───────────────────────────────────────────────────────
@@ -54,6 +55,8 @@ const allowedTransitions = computed(() => {
 
 const isTransitioning = ref(false)
 const showInterviewSidebar = ref(false)
+const showDeleteConfirm = ref(false)
+const isDeleting = ref(false)
 
 async function handleTransition(newStatus: string) {
   isTransitioning.value = true
@@ -64,6 +67,21 @@ async function handleTransition(newStatus: string) {
     toast.error('Failed to update status', { message: err.data?.statusMessage, statusCode: err.data?.statusCode })
   } finally {
     isTransitioning.value = false
+  }
+}
+
+async function handleDelete() {
+  isDeleting.value = true
+  try {
+    await deleteApplication()
+    emit('deleted')
+  }
+  catch (err: any) {
+    if (handlePreviewReadOnlyError(err)) return
+    toast.error('Failed to delete application', { message: err.data?.statusMessage, statusCode: err.data?.statusCode })
+  }
+  finally {
+    isDeleting.value = false
   }
 }
 
@@ -111,7 +129,9 @@ function formatResponseValue(value: unknown): string {
 // ─── Body scroll lock + keyboard handling ─────────────────────────────────────
 
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') emit('close')
+  if (e.key !== 'Escape') return
+  if (showDeleteConfirm.value) showDeleteConfirm.value = false
+  else emit('close')
 }
 
 onMounted(() => {
@@ -243,6 +263,13 @@ onUnmounted(() => {
                 >
                   <Calendar class="size-3.5" />
                   Schedule Interview
+                </button>
+                <button
+                  class="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-danger-300 dark:border-danger-700 bg-white/80 dark:bg-surface-900 px-3.5 py-1.5 text-sm font-medium text-danger-600 dark:text-danger-400 hover:bg-danger-50 dark:hover:bg-danger-950 transition-colors focus:outline-none focus:ring-2 focus:ring-danger-500/40"
+                  @click="showDeleteConfirm = true"
+                >
+                  <Trash2 class="size-3.5" />
+                  Delete application
                 </button>
               </div>
             </div>
@@ -446,5 +473,32 @@ onUnmounted(() => {
       @close="showInterviewSidebar = false"
       @scheduled="showInterviewSidebar = false"
     />
+
+    <div v-if="showDeleteConfirm && application" class="fixed inset-0 z-[70] flex items-center justify-center">
+      <div class="absolute inset-0 bg-black/50" @click="showDeleteConfirm = false" />
+      <div class="relative w-full max-w-sm rounded-lg bg-white p-6 shadow-xl dark:bg-surface-900 mx-4" role="dialog" aria-modal="true" aria-labelledby="drawer-delete-application-title">
+        <h2 id="drawer-delete-application-title" class="mb-2 text-lg font-semibold text-surface-900 dark:text-surface-50">Delete Application</h2>
+        <p class="mb-4 text-sm text-surface-600 dark:text-surface-400">
+          Delete {{ formatCandidateName(application.candidate) }}'s application for
+          <strong>{{ application.job.title }}</strong>? Application responses, interviews, scores, and messages will be permanently deleted. The candidate remains in your candidate list.
+        </p>
+        <div class="flex justify-end gap-2">
+          <button
+            :disabled="isDeleting"
+            class="rounded-lg border border-surface-300 px-3 py-1.5 text-sm font-medium text-surface-700 hover:bg-surface-50 disabled:opacity-50 dark:border-surface-600 dark:text-surface-300 dark:hover:bg-surface-800"
+            @click="showDeleteConfirm = false"
+          >
+            Cancel
+          </button>
+          <button
+            :disabled="isDeleting"
+            class="rounded-lg bg-danger-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-danger-700 disabled:opacity-50"
+            @click="handleDelete"
+          >
+            {{ isDeleting ? 'Deleting…' : 'Delete application' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </Teleport>
 </template>

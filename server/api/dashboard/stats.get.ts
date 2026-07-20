@@ -1,4 +1,4 @@
-import { eq, and, desc, sql, count } from 'drizzle-orm'
+import { eq, and, desc, sql, count, inArray, isNull } from 'drizzle-orm'
 import { application, candidate, job } from '../../database/schema'
 
 /**
@@ -13,6 +13,14 @@ import { application, candidate, job } from '../../database/schema'
 export default defineEventHandler(async (event) => {
   const session = await requirePermission(event, { job: ['read'], candidate: ['read'], application: ['read'] })
   const orgId = session.session.activeOrganizationId
+  const activeCandidateIds = db.select({ id: candidate.id }).from(candidate).where(and(
+    eq(candidate.organizationId, orgId),
+    isNull(candidate.quarantinedAt),
+  ))
+  const activeApplicationCondition = and(
+    eq(application.organizationId, orgId),
+    inArray(application.candidateId, activeCandidateIds),
+  )
 
   // ─────────────────────────────────────────────
   // Run all queries in parallel for performance
@@ -31,13 +39,13 @@ export default defineEventHandler(async (event) => {
     db.$count(job, and(eq(job.organizationId, orgId), eq(job.status, 'open'))),
 
     // 2. Total candidates
-    db.$count(candidate, eq(candidate.organizationId, orgId)),
+    db.$count(candidate, and(eq(candidate.organizationId, orgId), isNull(candidate.quarantinedAt))),
 
     // 3. Total applications
-    db.$count(application, eq(application.organizationId, orgId)),
+    db.$count(application, activeApplicationCondition),
 
     // 4. New (unreviewed) applications
-    db.$count(application, and(eq(application.organizationId, orgId), eq(application.status, 'new'))),
+    db.$count(application, and(activeApplicationCondition, eq(application.status, 'new'))),
 
     // 5. Pipeline breakdown — application count per status
     db
@@ -46,7 +54,7 @@ export default defineEventHandler(async (event) => {
         count: count().as('count'),
       })
       .from(application)
-      .where(eq(application.organizationId, orgId))
+      .where(activeApplicationCondition)
       .groupBy(application.status),
 
     // 6. Jobs by status
@@ -75,7 +83,7 @@ export default defineEventHandler(async (event) => {
       .from(application)
       .innerJoin(candidate, eq(candidate.id, application.candidateId))
       .innerJoin(job, eq(job.id, application.jobId))
-      .where(eq(application.organizationId, orgId))
+      .where(and(eq(application.organizationId, orgId), isNull(candidate.quarantinedAt)))
       .orderBy(desc(application.createdAt))
       .limit(10),
 
@@ -96,7 +104,10 @@ export default defineEventHandler(async (event) => {
         rejectedCount: sql<number>`count(case when ${application.status} = 'rejected' then 1 end)`.as('rejected_count'),
       })
       .from(job)
-      .leftJoin(application, eq(application.jobId, job.id))
+      .leftJoin(application, and(
+        eq(application.jobId, job.id),
+        inArray(application.candidateId, activeCandidateIds),
+      ))
       .where(and(eq(job.organizationId, orgId), eq(job.status, 'open')))
       .groupBy(job.id)
       .orderBy(sql`count(${application.id}) desc`)

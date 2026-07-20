@@ -1,6 +1,6 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { z } from 'zod'
-import { application, propertyDefinition, propertyValue } from '../../../../database/schema'
+import { application, candidate, propertyDefinition, propertyValue } from '../../../../database/schema'
 import {
   setPropertyValueSchema,
   validateValueForType,
@@ -22,10 +22,18 @@ export default defineEventHandler(async (event) => {
 
   const { id, propId } = await getValidatedRouterParams(event, paramsSchema.parse)
   const { value } = await readValidatedBody(event, setPropertyValueSchema.parse)
+  const activeCandidateIds = db.select({ id: candidate.id }).from(candidate).where(and(
+    eq(candidate.organizationId, orgId),
+    isNull(candidate.quarantinedAt),
+  ))
 
   // Verify entity belongs to org
   const app = await db.query.application.findFirst({
-    where: and(eq(application.id, id), eq(application.organizationId, orgId)),
+    where: and(
+      eq(application.id, id),
+      eq(application.organizationId, orgId),
+      inArray(application.candidateId, activeCandidateIds),
+    ),
     columns: { id: true, jobId: true },
   })
   if (!app) throw createError({ statusCode: 404, statusMessage: 'Application not found' })

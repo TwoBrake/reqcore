@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, lte } from 'drizzle-orm'
+import { and, count, desc, eq, gte, isNull, lte } from 'drizzle-orm'
 import { interview, application, candidate, job } from '../../database/schema'
 import { interviewQuerySchema } from '../../utils/schemas/interview'
 
@@ -8,7 +8,10 @@ export default defineEventHandler(async (event) => {
 
   const query = await getValidatedQuery(event, interviewQuerySchema.parse)
 
-  const conditions = [eq(interview.organizationId, orgId)]
+  const conditions = [
+    eq(interview.organizationId, orgId),
+    isNull(candidate.quarantinedAt),
+  ]
 
   if (query.applicationId) {
     conditions.push(eq(interview.applicationId, query.applicationId))
