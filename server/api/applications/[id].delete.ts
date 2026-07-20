@@ -78,20 +78,6 @@ export default defineEventHandler(async (event) => {
       })
     : []
 
-  for (const attachment of attachments) {
-    try {
-      await deleteFromS3(attachment.storageKey)
-    }
-    catch (error) {
-      logWarn('application.attachment_delete_failed', {
-        organization_id: orgId,
-        application_id: id,
-        storage_key: attachment.storageKey,
-        error_message: error instanceof Error ? error.message : String(error),
-      })
-    }
-  }
-
   await db.transaction(async (tx) => {
     await tx.delete(comment).where(and(
       eq(comment.organizationId, orgId),
@@ -111,6 +97,23 @@ export default defineEventHandler(async (event) => {
       throw createError({ statusCode: 404, statusMessage: 'Application not found' })
     }
   })
+
+  // The DB rows are gone; now clean up the S3 objects. Doing this after the
+  // commit avoids orphaning attachment rows against deleted storage if the
+  // transaction rolls back.
+  for (const attachment of attachments) {
+    try {
+      await deleteFromS3(attachment.storageKey)
+    }
+    catch (error) {
+      logWarn('application.attachment_delete_failed', {
+        organization_id: orgId,
+        application_id: id,
+        storage_key: attachment.storageKey,
+        error_message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
 
   for (const row of applicationInterviews) {
     if (!row.googleCalendarEventId) continue
