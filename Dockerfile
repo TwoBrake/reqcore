@@ -21,6 +21,10 @@ ENV POSTHOG_PUBLIC_KEY=${POSTHOG_PUBLIC_KEY}
 ARG POSTHOG_HOST
 ENV POSTHOG_HOST=${POSTHOG_HOST}
 
+# Feature-flag overrides are read by nuxt.config.ts while the client bundle is built.
+ARG FEATURE_FLAG_NOTIFICATIONS
+ENV FEATURE_FLAG_NOTIFICATIONS=${FEATURE_FLAG_NOTIFICATIONS}
+
 RUN npm run build
 
 # ─── Stage 2: Run ────────────────────────────────────────────────────────────
