@@ -35,11 +35,6 @@ export default defineEventHandler(async (event) => {
   const session = await requireAuth(event)
   const orgId = session.session.activeOrganizationId
   const userId = session.user.id
-  const enabled = await resolveFeatureFlagForEvent(event, 'notifications', {
-    userId,
-    organizationId: orgId,
-  })
-  if (!enabled) throw createError({ statusCode: 404, statusMessage: 'Not found' })
 
   if (isDemoAccountEmail(session.user.email)) {
     return NOTIFICATION_TYPES.map(type => ({ type, channelMode: 'off' as const }))

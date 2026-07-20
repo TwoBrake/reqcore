@@ -9,7 +9,6 @@ const route = useRoute()
 const localePath = useLocalePath()
 const { t } = useI18n()
 const { hasFeature } = usePlanFeature()
-const notificationsEnabled = useFeatureFlagEnabled('notifications')
 
 /** Show a lock hint when the org's plan can't use a nav item's feature. */
 function isLocked(feature?: PlanFeature) {
@@ -113,10 +112,6 @@ const settingsNav: SettingsNavItem[] = [
   },
 ]
 
-const visibleSettingsNav = computed(() => settingsNav.filter(item =>
-  item.to !== '/dashboard/settings/notifications' || notificationsEnabled.value,
-))
-
 function isActive(to: string, exact: boolean) {
   const localizedTo = localePath(to)
   if (exact) return route.path === localizedTo
@@ -151,7 +146,7 @@ function isActive(to: string, exact: boolean) {
     <nav class="flex-1 px-3 pb-5">
       <div class="flex flex-col gap-0.5">
         <NuxtLink
-          v-for="item in visibleSettingsNav"
+          v-for="item in settingsNav"
           :key="item.to"
           :to="$localePath(item.to)"
           class="group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all no-underline"

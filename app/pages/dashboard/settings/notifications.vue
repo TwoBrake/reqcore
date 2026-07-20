@@ -18,12 +18,6 @@ useSeoMeta({
 
 const { preferences, status, error, refresh, updatePreferences } = await useNotificationPreferences()
 const { track } = useTrack()
-const localePath = useLocalePath()
-const notificationsEnabled = useFeatureFlagEnabled('notifications')
-
-watch(notificationsEnabled, (enabled) => {
-  if (!enabled) void navigateTo(localePath('/dashboard/settings'))
-}, { immediate: true })
 
 const MODES: Array<{ value: NotificationChannelMode, label: string, hint: string }> = [
   { value: 'off', label: 'Off', hint: 'No email' },

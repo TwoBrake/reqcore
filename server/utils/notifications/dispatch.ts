@@ -74,13 +74,6 @@ function enrichPayload(row: OutboxRow): Record<string, unknown> {
   }
 }
 
-async function featureEnabled(organizationId: string): Promise<boolean> {
-  return isServerFeatureEnabled('notifications', {
-    distinctId: `notification-org:${organizationId}`,
-    groups: { organization: organizationId },
-  })
-}
-
 async function isSuppressed(email: string, dbc: NotificationDbClient = db): Promise<boolean> {
   const rows = await dbc.select({ id: emailSuppression.id })
     .from(emailSuppression)
@@ -148,18 +141,7 @@ async function dispatchInstant(source: NotificationDispatchSource, batchSize: nu
   const result = emptyResult(source)
   result.processed = rows.length
 
-  const flags = new Map<string, boolean>()
   for (const row of rows) {
-    let enabled = flags.get(row.organizationId)
-    if (enabled === undefined) {
-      enabled = await featureEnabled(row.organizationId)
-      flags.set(row.organizationId, enabled)
-    }
-    if (!enabled) {
-      await markSkipped([row.id], 'feature_disabled')
-      result.skipped++
-      continue
-    }
     if (await isSuppressed(row.recipientEmail)) {
       await markSkipped([row.id], 'email_suppressed')
       result.skipped++
@@ -261,22 +243,11 @@ async function dispatchDigest(
     .limit(batchSize)
 
   const result = emptyResult(source)
-  const flags = new Map<string, boolean>()
   for (const key of groups) {
     const rows = await claimDigestGroup(key, now, retryOnly)
     if (rows.length === 0 || !key.digestBucket) continue
     result.processed += rows.length
 
-    let enabled = flags.get(key.organizationId)
-    if (enabled === undefined) {
-      enabled = await featureEnabled(key.organizationId)
-      flags.set(key.organizationId, enabled)
-    }
-    if (!enabled) {
-      await markSkipped(rows.map(row => row.id), 'feature_disabled')
-      result.skipped += rows.length
-      continue
-    }
     if (await isSuppressed(key.recipientEmail)) {
       await markSkipped(rows.map(row => row.id), 'email_suppressed')
       result.skipped += rows.length

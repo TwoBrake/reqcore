@@ -1,11 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { sendMock, featureMock } = vi.hoisted(() => ({
+const { sendMock } = vi.hoisted(() => ({
   sendMock: vi.fn(),
-  featureMock: vi.fn(),
 }))
 vi.mock('../../server/utils/email', () => ({ sendNotificationEmail: sendMock }))
-vi.mock('../../server/utils/featureFlags', () => ({ isServerFeatureEnabled: featureMock }))
 
 const { runNotificationDispatch, runNotificationDigest } = await import('../../server/utils/notifications/dispatch')
 
@@ -74,14 +72,12 @@ beforeEach(() => {
   vi.stubGlobal('logInfo', vi.fn())
   vi.stubGlobal('logWarn', vi.fn())
   vi.stubGlobal('logError', vi.fn())
-  featureMock.mockResolvedValue(true)
 })
 
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.useRealTimers()
   sendMock.mockReset()
-  featureMock.mockReset()
 })
 
 describe('runNotificationDispatch', () => {
