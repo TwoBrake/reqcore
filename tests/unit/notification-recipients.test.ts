@@ -54,4 +54,21 @@ describe('resolveRecipients', () => {
     const recipients = await resolveRecipients('org1', 'candidate_replied', fakeDb([[]]))
     expect(recipients).toEqual([])
   })
+
+  it('never returns the shared demo account as an email recipient', async () => {
+    const members = [
+      { userId: 'demo', email: 'demo@reqcore.com' },
+      { userId: 'recruiter', email: 'recruiter@example.com' },
+    ]
+
+    const recipients = await resolveRecipients(
+      'org1',
+      'candidate_replied',
+      fakeDb([members, [], []]),
+    )
+
+    expect(recipients).toEqual([
+      { userId: 'recruiter', email: 'recruiter@example.com', cadence: 'instant' },
+    ])
+  })
 })

@@ -10,6 +10,7 @@ import {
   type NotificationCadence,
   type NotificationType,
 } from '~~/shared/notifications'
+import { isDemoAccountEmail } from '../demoOrg'
 
 /** Either the global db or an open transaction — both expose the query/select API we use. */
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
@@ -56,6 +57,7 @@ export async function resolveRecipients(
 
   const recipients: NotificationRecipient[] = []
   for (const m of members) {
+    if (isDemoAccountEmail(m.email)) continue
     if (suppressedSet.has(m.email.toLowerCase())) continue
     const mode = prefByUser.get(m.userId) ?? DEFAULT_CHANNEL_MODE[type]
     if (mode === 'off') continue

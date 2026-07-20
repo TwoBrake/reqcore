@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { notificationPreference } from '../../database/schema'
 import { DEFAULT_CHANNEL_MODE, NOTIFICATION_TYPES } from '~~/shared/notifications'
+import { isDemoAccountEmail } from '../../utils/demoOrg'
 
 const bodySchema = z.object({
   preferences: z.array(z.object({
@@ -24,6 +25,10 @@ export default defineEventHandler(async (event) => {
     organizationId: orgId,
   })
   if (!enabled) throw createError({ statusCode: 404, statusMessage: 'Not found' })
+
+  if (isDemoAccountEmail(session.user.email)) {
+    return NOTIFICATION_TYPES.map(type => ({ type, channelMode: 'off' as const }))
+  }
 
   const { preferences } = await readValidatedBody(event, bodySchema.parse)
 

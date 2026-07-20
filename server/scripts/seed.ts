@@ -57,6 +57,11 @@ const DEMO_EMAIL = "demo@reqcore.com";
 const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? "demo1234";
 const DEMO_ORG_NAME = "Reqcore Demo";
 const DEMO_ORG_SLUG = "reqcore-demo";
+const DEMO_NOTIFICATION_TYPES = [
+  "candidate_replied",
+  "application_created",
+  "analysis_completed",
+] as const;
 
 // Legacy values from the old applirank.com domain — cleaned up on seed
 const LEGACY_DEMO_EMAIL = "demo@applirank.com";
@@ -118,6 +123,37 @@ function generateSlug(title: string, uuid: string): string {
     .slice(0, 60);
   const shortId = uuid.replace(/-/g, "").slice(0, 8);
   return `${base}-${shortId}`;
+}
+
+async function disableDemoEmailNotifications(
+  userId: string,
+  organizationId: string,
+): Promise<void> {
+  const now = new Date();
+
+  for (const type of DEMO_NOTIFICATION_TYPES) {
+    await db
+      .insert(schema.notificationPreference)
+      .values({
+        id: id(),
+        userId,
+        organizationId,
+        type,
+        channelMode: "off",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [
+          schema.notificationPreference.userId,
+          schema.notificationPreference.organizationId,
+          schema.notificationPreference.type,
+        ],
+        set: { channelMode: "off", updatedAt: now },
+      });
+  }
+
+  console.log("✅ Disabled email notifications for the demo account");
 }
 
 // ─────────────────────────────────────────────
@@ -9345,6 +9381,8 @@ async function seed() {
       console.log("✅ Linked demo user to existing org as owner");
     }
 
+    await disableDemoEmailNotifications(userId, existingOrg.id);
+
     console.log("⚠️  Demo organization already exists. Skipping full seed.");
     console.log(
       "   To re-seed all data, delete the organization first or reset the database.",
@@ -9371,6 +9409,8 @@ async function seed() {
     role: "owner",
     createdAt: daysAgo(30),
   });
+
+  await disableDemoEmailNotifications(userId, orgId);
 
   console.log(`✅ Created organization: ${DEMO_ORG_NAME}`);
 

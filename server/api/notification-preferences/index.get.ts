@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm'
 import { notificationPreference } from '../../database/schema'
 import { DEFAULT_CHANNEL_MODE, NOTIFICATION_TYPES } from '~~/shared/notifications'
+import { isDemoAccountEmail } from '../../utils/demoOrg'
 
 /**
  * GET /api/notification-preferences
@@ -16,6 +17,10 @@ export default defineEventHandler(async (event) => {
     organizationId: orgId,
   })
   if (!enabled) throw createError({ statusCode: 404, statusMessage: 'Not found' })
+
+  if (isDemoAccountEmail(session.user.email)) {
+    return NOTIFICATION_TYPES.map(type => ({ type, channelMode: 'off' as const }))
+  }
 
   const rows = await db.select({
     type: notificationPreference.type,
