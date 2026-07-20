@@ -7,6 +7,7 @@ import { member, user } from '../../database/schema/auth'
 import { emailSuppression, notificationPreference } from '../../database/schema/app'
 import {
   DEFAULT_CHANNEL_MODE,
+  normalizeNotificationChannelMode,
   type NotificationCadence,
   type NotificationType,
 } from '~~/shared/notifications'
@@ -59,7 +60,7 @@ export async function resolveRecipients(
   for (const m of members) {
     if (isDemoAccountEmail(m.email)) continue
     if (suppressedSet.has(m.email.toLowerCase())) continue
-    const mode = prefByUser.get(m.userId) ?? DEFAULT_CHANNEL_MODE[type]
+    const mode = normalizeNotificationChannelMode(type, prefByUser.get(m.userId) ?? DEFAULT_CHANNEL_MODE[type])
     if (mode === 'off') continue
     recipients.push({ userId: m.userId, email: m.email, cadence: mode })
   }

@@ -12,7 +12,6 @@ import { captureAiGeneration } from '../../../utils/ai/observability'
 import { extractResumeText } from '../../../utils/resume-parser'
 import { fetchScreeningAnswers, DEFAULT_ANALYSIS_CONTEXT } from '../../../utils/ai/analysisContext'
 import { parseAndPersistDocument } from '../../../utils/document-parser'
-import { enqueueNotification } from '../../../utils/notifications/enqueue'
 import { createRateLimiter } from '../../../utils/rateLimit'
 import { z } from 'zod'
 
@@ -228,7 +227,7 @@ export default defineEventHandler(async (event) => {
       .where(eq(application.id, applicationId))
 
     // Record analysis run
-    const inserted = await tx.insert(analysisRun).values({
+    return tx.insert(analysisRun).values({
       organizationId: orgId,
       applicationId,
       status: 'completed',
@@ -242,24 +241,6 @@ export default defineEventHandler(async (event) => {
       costUsdMicros,
       scoredById: session.user.id,
     }).returning()
-
-    // Enqueue in the same tx so the notification is never lost if the run commits.
-    const runRow = inserted[0]
-    if (runRow) {
-      await enqueueNotification({
-        organizationId: orgId,
-        type: 'analysis_completed',
-        dedupeKey: `analysis_completed:${runRow.id}`,
-        payload: {
-          applicationId,
-          candidateName: `${app.candidate.firstName} ${app.candidate.lastName}`.trim(),
-          jobTitle: app.job.title,
-          compositeScore,
-        },
-        tx,
-      })
-    }
-    return inserted
   })
 
   captureAiGeneration({

@@ -16,6 +16,10 @@ export function applicationUrl(applicationId: string): string {
   return `${appBaseUrl()}/dashboard/applications/${applicationId}`
 }
 
+export function interviewUrl(interviewId: string): string {
+  return `${appBaseUrl()}/dashboard/interviews/${interviewId}`
+}
+
 export function dashboardUrl(): string {
   return `${appBaseUrl()}/dashboard`
 }

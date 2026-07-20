@@ -108,14 +108,6 @@ export interface ApplicationCreatedPayload {
   applicationUrl: string
 }
 
-export interface AnalysisCompletedPayload {
-  candidateName: string
-  jobTitle: string
-  /** Composite 0–100 score, or null when the run produced none. */
-  compositeScore: number | null
-  applicationUrl: string
-}
-
 export interface CandidateRepliedPayload {
   candidateName: string
   jobTitle: string
@@ -124,10 +116,18 @@ export interface CandidateRepliedPayload {
   applicationUrl: string
 }
 
+export interface InterviewResponsePayload {
+  candidateName: string
+  jobTitle: string
+  interviewTitle: string
+  response: 'accepted' | 'declined' | 'tentative'
+  interviewUrl: string
+}
+
 export interface NotificationPayloads {
   application_created: ApplicationCreatedPayload
-  analysis_completed: AnalysisCompletedPayload
   candidate_replied: CandidateRepliedPayload
+  interview_response: InterviewResponsePayload
 }
 
 const basePayloadSchema = z.object({
@@ -138,10 +138,14 @@ const basePayloadSchema = z.object({
 
 const payloadSchemas = {
   application_created: basePayloadSchema,
-  analysis_completed: basePayloadSchema.extend({
-    compositeScore: z.number().finite().min(0).max(100).nullable(),
-  }),
   candidate_replied: basePayloadSchema.extend({ preview: z.string() }),
+  interview_response: z.object({
+    candidateName: z.string().min(1),
+    jobTitle: z.string().min(1),
+    interviewTitle: z.string().min(1),
+    response: z.enum(['accepted', 'declined', 'tentative']),
+    interviewUrl: z.string().url(),
+  }),
 } as const
 
 function parsePayload<T extends NotificationType>(
@@ -180,36 +184,6 @@ function buildApplicationCreated(p: ApplicationCreatedPayload): RenderedEmail {
   }
 }
 
-function buildAnalysisCompleted(p: AnalysisCompletedPayload): RenderedEmail {
-  const scoreLabel = p.compositeScore != null ? `${p.compositeScore}/100` : 'ready'
-  const subject = `AI scoring finished for ${p.candidateName}`
-  const scoreLine = p.compositeScore != null
-    ? paragraph(`Composite score: <strong>${escapeHtml(scoreLabel)}</strong>.`)
-    : ''
-  return {
-    subject,
-    html: renderNotificationLayout({
-      title: subject,
-      heading: 'AI scoring finished',
-      bodyHtml:
-        paragraph(`<strong>${escapeHtml(p.candidateName)}</strong> was scored for <strong>${escapeHtml(p.jobTitle)}</strong>.`)
-        + scoreLine
-        + paragraph('Open the application to see the breakdown and shortlist.'),
-      cta: { label: 'Review scoring', url: p.applicationUrl },
-    }),
-    text: [
-      'AI scoring finished',
-      '',
-      `${p.candidateName} was scored for ${p.jobTitle}.`,
-      ...(p.compositeScore != null ? [`Composite score: ${scoreLabel}.`] : []),
-      '',
-      `Review the scoring: ${p.applicationUrl}`,
-      '',
-      '— Reqcore',
-    ].join('\n'),
-  }
-}
-
 function buildCandidateReplied(p: CandidateRepliedPayload): RenderedEmail {
   const subject = `${p.candidateName} replied`
   const previewHtml = p.preview
@@ -239,6 +213,37 @@ function buildCandidateReplied(p: CandidateRepliedPayload): RenderedEmail {
   }
 }
 
+const INTERVIEW_RESPONSE_COPY = {
+  accepted: { subject: 'accepted the interview', heading: 'Interview accepted', detail: 'confirmed' },
+  declined: { subject: 'declined the interview', heading: 'Interview declined', detail: 'declined' },
+  tentative: { subject: 'requested another time', heading: 'New time requested', detail: 'requested another time for' },
+} as const
+
+function buildInterviewResponse(p: InterviewResponsePayload): RenderedEmail {
+  const copy = INTERVIEW_RESPONSE_COPY[p.response]
+  const subject = `${p.candidateName} ${copy.subject}`
+  return {
+    subject,
+    html: renderNotificationLayout({
+      title: subject,
+      heading: copy.heading,
+      bodyHtml:
+        paragraph(`<strong>${escapeHtml(p.candidateName)}</strong> ${copy.detail} <strong>${escapeHtml(p.interviewTitle)}</strong> for <strong>${escapeHtml(p.jobTitle)}</strong>.`)
+        + paragraph('Open the interview to review the response and follow up.'),
+      cta: { label: 'Open interview', url: p.interviewUrl },
+    }),
+    text: [
+      copy.heading,
+      '',
+      `${p.candidateName} ${copy.detail} ${p.interviewTitle} for ${p.jobTitle}.`,
+      '',
+      `Open the interview: ${p.interviewUrl}`,
+      '',
+      '— Reqcore',
+    ].join('\n'),
+  }
+}
+
 /**
  * Render an instant notification email for one outbox row. Returns null when the
  * payload doesn't match the event's expected shape (defensive — a bad row is
@@ -253,13 +258,13 @@ export function renderNotification(
       const parsed = parsePayload(type, payload)
       return parsed ? buildApplicationCreated(parsed) : null
     }
-    case 'analysis_completed': {
-      const parsed = parsePayload(type, payload)
-      return parsed ? buildAnalysisCompleted(parsed) : null
-    }
     case 'candidate_replied': {
       const parsed = parsePayload(type, payload)
       return parsed ? buildCandidateReplied(parsed) : null
+    }
+    case 'interview_response': {
+      const parsed = parsePayload(type, payload)
+      return parsed ? buildInterviewResponse(parsed) : null
     }
     default:
       return null
@@ -274,10 +279,16 @@ export function summarizeNotification(type: NotificationType, payload: Record<st
   switch (type) {
     case 'application_created':
       return `<strong>${name}</strong> applied for ${job}`
-    case 'analysis_completed':
-      return `<strong>${name}</strong> was scored for ${job}${p.compositeScore != null ? ` (${escapeHtml(String(p.compositeScore))}/100)` : ''}`
     case 'candidate_replied':
       return `<strong>${name}</strong> replied about ${job}`
+    case 'interview_response': {
+      const response = p.response === 'accepted'
+        ? 'accepted'
+        : p.response === 'declined'
+          ? 'declined'
+          : 'requested another time for'
+      return `<strong>${name}</strong> ${response} ${escapeHtml(String(p.interviewTitle ?? 'the interview'))} for ${job}`
+    }
     default:
       return name
   }
@@ -295,6 +306,7 @@ export function renderDigest(params: {
   const validItems = params.items.every(item => parsePayload(item.type, {
     ...item.payload,
     applicationUrl: item.applicationUrl,
+    interviewUrl: item.applicationUrl,
   }))
   if (!validItems || params.items.length === 0) return null
 

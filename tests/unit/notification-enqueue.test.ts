@@ -6,6 +6,7 @@ vi.mock('../../server/utils/notifications/recipients', () => ({
 }))
 
 const { digestBucketFor, digestDeliveryAt, enqueueNotification } = await import('../../server/utils/notifications/enqueue')
+const { enqueueInterviewResponseNotification } = await import('../../server/utils/notifications/interview-response')
 
 function insertionDb() {
   const stored = new Map<string, Record<string, unknown>>()
@@ -87,6 +88,34 @@ describe('enqueueNotification', () => {
       payload: {},
     })).resolves.toBeUndefined()
     expect(logWarn).toHaveBeenCalledWith('notification.enqueue_failed', expect.any(Object))
+  })
+
+  it('uses a bounded interview-and-response dedupe key for invitation responses', async () => {
+    recipientsMock.mockResolvedValue([
+      { userId: 'u1', email: 'one@example.com', cadence: 'instant' },
+    ])
+    const { db, stored } = insertionDb()
+
+    await enqueueInterviewResponseNotification({
+      organizationId: 'org1',
+      interviewId: 'interview1',
+      candidateName: 'Jane Doe',
+      jobTitle: 'Engineer',
+      interviewTitle: 'Technical interview',
+      response: 'accepted',
+      tx: db as never,
+    })
+
+    expect(stored.get('interview_response:interview1:accepted:u1')).toMatchObject({
+      type: 'interview_response',
+      payload: {
+        interviewId: 'interview1',
+        candidateName: 'Jane Doe',
+        jobTitle: 'Engineer',
+        interviewTitle: 'Technical interview',
+        response: 'accepted',
+      },
+    })
   })
 })
 

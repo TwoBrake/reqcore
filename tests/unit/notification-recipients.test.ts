@@ -25,11 +25,11 @@ function fakeDb(resultsInOrder: unknown[]): NotificationDbClient {
 }
 
 describe('resolveRecipients', () => {
-  it('applies defaults, honors off/instant, and excludes suppressed addresses', async () => {
+  it('applies defaults, honors off, normalizes legacy instant applications, and excludes suppressed addresses', async () => {
     const members = [
       { userId: 'a', email: 'a@example.com' }, // no pref → default (digest for application_created)
       { userId: 'b', email: 'b@example.com' }, // pref: off → excluded
-      { userId: 'c', email: 'c@example.com' }, // pref: instant
+      { userId: 'c', email: 'c@example.com' }, // legacy pref: instant -> digest
       { userId: 'd', email: 'd@example.com' }, // suppressed → excluded
     ]
     const prefs = [
@@ -46,7 +46,7 @@ describe('resolveRecipients', () => {
 
     expect(recipients).toEqual([
       { userId: 'a', email: 'a@example.com', cadence: 'digest' },
-      { userId: 'c', email: 'c@example.com', cadence: 'instant' },
+      { userId: 'c', email: 'c@example.com', cadence: 'digest' },
     ])
   })
 
@@ -65,6 +65,18 @@ describe('resolveRecipients', () => {
       'org1',
       'candidate_replied',
       fakeDb([members, [], []]),
+    )
+
+    expect(recipients).toEqual([
+      { userId: 'recruiter', email: 'recruiter@example.com', cadence: 'instant' },
+    ])
+  })
+
+  it('delivers interview responses instantly by default', async () => {
+    const recipients = await resolveRecipients(
+      'org1',
+      'interview_response',
+      fakeDb([[{ userId: 'recruiter', email: 'recruiter@example.com' }], [], []]),
     )
 
     expect(recipients).toEqual([

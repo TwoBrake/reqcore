@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { application, candidateConversation, candidateMessage, interview } from '../../../database/schema'
 import { normalizeEmailAddress, replySubject } from '../../../../ee/server/utils/candidate-messaging'
 import { verifyInterviewToken } from '../../../utils/interview-token'
+import { enqueueInterviewResponseNotification } from '../../../utils/notifications/interview-response'
 
 const respondBodySchema = z.object({
   token: z.string().min(1, 'Token is required'),
@@ -54,7 +55,10 @@ export default defineEventHandler(async (event) => {
 
   const app = await db.query.application.findFirst({
     where: eq(application.id, interviewRecord.applicationId),
-    with: { candidate: { columns: { email: true } } },
+    with: {
+      candidate: { columns: { email: true, firstName: true, lastName: true } },
+      job: { columns: { title: true } },
+    },
   })
   const conversation = await db.query.candidateConversation.findFirst({
     where: and(
@@ -146,6 +150,18 @@ export default defineEventHandler(async (event) => {
         }).where(eq(candidateConversation.id, conversation.id))
       }
     }
+    if (result && app?.candidate && app.job) {
+      await enqueueInterviewResponseNotification({
+        organizationId: interviewRecord.organizationId,
+        interviewId: interviewRecord.id,
+        candidateName: `${app.candidate.firstName} ${app.candidate.lastName}`.trim() || app.candidate.email,
+        jobTitle: app.job.title,
+        interviewTitle: interviewRecord.title,
+        response: action,
+        tx,
+      })
+    }
+
     return result
   })
 

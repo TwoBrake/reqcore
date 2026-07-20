@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { Bell, Save, Check, Loader2 } from 'lucide-vue-next'
 import {
+  DEFAULT_CHANNEL_MODE,
+  NOTIFICATION_CHANNEL_MODES,
   NOTIFICATION_TYPES,
   NOTIFICATION_TYPE_META,
   type NotificationChannelMode,
@@ -14,7 +16,7 @@ useSeoMeta({
   description: 'Choose which recruiter events email you, and whether instantly or in a daily digest',
 })
 
-const { preferences, status, error, refresh, updatePreferences } = useNotificationPreferences()
+const { preferences, status, error, refresh, updatePreferences } = await useNotificationPreferences()
 const { track } = useTrack()
 const localePath = useLocalePath()
 const notificationsEnabled = useFeatureFlagEnabled('notifications')
@@ -29,20 +31,27 @@ const MODES: Array<{ value: NotificationChannelMode, label: string, hint: string
   { value: 'digest', label: 'Daily digest', hint: 'Once a day' },
 ]
 
+function modesFor(type: NotificationType) {
+  return MODES.filter(mode => NOTIFICATION_CHANNEL_MODES[type].includes(mode.value))
+}
+
 // Local editable copy keyed by event type.
 const local = ref<Record<NotificationType, NotificationChannelMode>>({
-  candidate_replied: 'instant',
-  application_created: 'digest',
-  analysis_completed: 'instant',
+  ...DEFAULT_CHANNEL_MODE,
 })
 const saved = ref<Record<NotificationType, NotificationChannelMode>>({ ...local.value })
 
-watch(preferences, (prefs) => {
-  for (const pref of prefs ?? []) {
-    local.value[pref.type] = pref.channelMode
-    saved.value[pref.type] = pref.channelMode
+function applyPreferences(prefs: NotificationPreference[]) {
+  if (prefs.length !== NOTIFICATION_TYPES.length) return
+  const next = { ...DEFAULT_CHANNEL_MODE }
+  for (const pref of prefs) {
+    next[pref.type] = pref.channelMode
   }
-}, { immediate: true })
+  local.value = next
+  saved.value = { ...next }
+}
+
+watch(preferences, prefs => applyPreferences(prefs ?? []), { immediate: true })
 
 const isReady = computed(() => status.value === 'success' && preferences.value.length === NOTIFICATION_TYPES.length)
 const isDirty = computed(() => NOTIFICATION_TYPES.some(type => local.value[type] !== saved.value[type]))
@@ -118,34 +127,34 @@ async function handleSave() {
             v-for="type in NOTIFICATION_TYPES"
             :key="type"
           >
-          <label class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
-            {{ NOTIFICATION_TYPE_META[type].label }}
-          </label>
-          <p class="text-xs text-surface-400 dark:text-surface-500 mb-3">
-            {{ NOTIFICATION_TYPE_META[type].description }}
-          </p>
-          <div class="flex flex-col sm:flex-row gap-3">
-            <label
-              v-for="mode in MODES"
-              :key="mode.value"
-              class="flex items-start gap-3 flex-1 rounded-lg border p-3.5 cursor-pointer transition-colors"
-              :class="local[type] === mode.value
-                ? 'border-brand-500 bg-brand-50/50 dark:bg-brand-950/30 dark:border-brand-600'
-                : 'border-surface-200 dark:border-surface-700 hover:border-surface-300 dark:hover:border-surface-600'"
-            >
-              <input
-                v-model="local[type]"
-                type="radio"
-                :value="mode.value"
-                :name="`mode-${type}`"
-                class="mt-0.5 accent-brand-600"
-              />
-              <div>
-                <span class="block text-sm font-medium text-surface-800 dark:text-surface-200">{{ mode.label }}</span>
-                <span class="block text-xs text-surface-400 mt-0.5">{{ mode.hint }}</span>
-              </div>
+            <label class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
+              {{ NOTIFICATION_TYPE_META[type].label }}
             </label>
-          </div>
+            <p class="text-xs text-surface-400 dark:text-surface-500 mb-3">
+              {{ NOTIFICATION_TYPE_META[type].description }}
+            </p>
+            <div class="flex flex-col sm:flex-row gap-3">
+              <label
+                v-for="mode in modesFor(type)"
+                :key="mode.value"
+                class="flex items-start gap-3 flex-1 rounded-lg border p-3.5 cursor-pointer transition-colors"
+                :class="local[type] === mode.value
+                  ? 'border-brand-500 bg-brand-50/50 dark:bg-brand-950/30 dark:border-brand-600'
+                  : 'border-surface-200 dark:border-surface-700 hover:border-surface-300 dark:hover:border-surface-600'"
+              >
+                <input
+                  v-model="local[type]"
+                  type="radio"
+                  :value="mode.value"
+                  :name="`mode-${type}`"
+                  class="mt-0.5 accent-brand-600"
+                />
+                <div>
+                  <span class="block text-sm font-medium text-surface-800 dark:text-surface-200">{{ mode.label }}</span>
+                  <span class="block text-xs text-surface-400 mt-0.5">{{ mode.hint }}</span>
+                </div>
+              </label>
+            </div>
           </div>
         </template>
 

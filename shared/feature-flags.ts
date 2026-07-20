@@ -61,7 +61,7 @@ export const FEATURE_FLAGS = {
    */
   'notifications': {
     defaultValue: true,
-    description: 'Recruiter email notifications (new applicant, reply, AI scoring) + daily digest.',
+    description: 'Recruiter email notifications (new applicant, reply, interview response) + daily digest.',
   },
 } as const satisfies Record<string, FeatureFlagDefinition>
 

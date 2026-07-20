@@ -955,9 +955,9 @@ export const analysisRun = pgTable('analysis_run', {
 // event is never lost), and a scheduled worker drains it, sends via Resend, and
 // retries with backoff. See server/utils/notifications/.
 
-/** The three v1 recruiter-facing events. New producers plug into the same engine. */
+/** Recruiter-facing events. New producers plug into the same engine. */
 export const notificationTypeEnum = pgEnum('notification_type', [
-  'candidate_replied', 'application_created', 'analysis_completed',
+  'candidate_replied', 'application_created', 'interview_response',
 ])
 /** How a single outbox row is delivered — immediately, or rolled into a daily digest. */
 export const notificationCadenceEnum = pgEnum('notification_cadence', ['instant', 'digest'])
@@ -1015,8 +1015,8 @@ export const notificationOutbox = pgTable('notification_outbox', {
 
 /**
  * Per-recipient, per-type delivery preference. Absent row = the sensible default
- * resolved in code (candidate_replied/analysis_completed → instant,
- * application_created → digest). See server/utils/notifications/recipients.ts.
+ * resolved in code (candidate_replied/interview_response -> instant,
+ * application_created -> digest). See server/utils/notifications/recipients.ts.
  */
 export const notificationPreference = pgTable('notification_preference', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),

@@ -3,8 +3,8 @@
  *
  * Modeled on `recordActivity` — it never throws, so a notification failure can
  * never break the primary write. Accepts an optional transaction so critical
- * events (e.g. analysis completion) are enqueued atomically with the triggering
- * write: if the tx rolls back, the outbox rows roll back with it.
+ * events are enqueued atomically with the triggering write: if the tx rolls
+ * back, the outbox rows roll back with it.
  *
  * Idempotency: each recipient row's `dedupeKey` is `<event key>:<userId>`, and
  * inserts use `onConflictDoNothing`, so re-running the same producer is a no-op.

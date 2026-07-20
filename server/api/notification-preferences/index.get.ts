@@ -1,6 +1,10 @@
 import { and, eq } from 'drizzle-orm'
 import { notificationPreference } from '../../database/schema'
-import { DEFAULT_CHANNEL_MODE, NOTIFICATION_TYPES } from '~~/shared/notifications'
+import {
+  DEFAULT_CHANNEL_MODE,
+  NOTIFICATION_TYPES,
+  normalizeNotificationChannelMode,
+} from '~~/shared/notifications'
 import { isDemoAccountEmail } from '../../utils/demoOrg'
 
 /**
@@ -35,6 +39,6 @@ export default defineEventHandler(async (event) => {
 
   return NOTIFICATION_TYPES.map(type => ({
     type,
-    channelMode: byType.get(type) ?? DEFAULT_CHANNEL_MODE[type],
+    channelMode: normalizeNotificationChannelMode(type, byType.get(type) ?? DEFAULT_CHANNEL_MODE[type]),
   }))
 })

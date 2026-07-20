@@ -26,22 +26,25 @@ describe('notification templates', () => {
     expect(rendered!.html).not.toContain('<img src=x>')
   })
 
-  it('includes the composite score when present and omits it when null', () => {
-    const withScore = renderNotification('analysis_completed', {
-      candidateName: 'Amir',
-      jobTitle: 'PM',
-      compositeScore: 87,
-      applicationUrl: 'https://app.example.com/dashboard/applications/x',
+  it.each([
+    ['accepted', 'Interview accepted', 'Jane Doe accepted the interview'],
+    ['declined', 'Interview declined', 'Jane Doe declined the interview'],
+    ['tentative', 'New time requested', 'Jane Doe requested another time'],
+  ] as const)('renders an %s interview response with a direct interview link', (response, heading, subject) => {
+    const rendered = renderNotification('interview_response', {
+      candidateName: 'Jane Doe',
+      jobTitle: 'Staff Engineer',
+      interviewTitle: 'Technical interview',
+      response,
+      interviewUrl: 'https://app.example.com/dashboard/interviews/interview-1',
     })
-    expect(withScore!.html).toContain('87/100')
 
-    const withoutScore = renderNotification('analysis_completed', {
-      candidateName: 'Amir',
-      jobTitle: 'PM',
-      compositeScore: null,
-      applicationUrl: 'https://app.example.com/dashboard/applications/x',
-    })
-    expect(withoutScore!.html).not.toContain('/100')
+    expect(rendered).not.toBeNull()
+    expect(rendered!.subject).toBe(subject)
+    expect(rendered!.html).toContain(heading)
+    expect(rendered!.html).toContain('Technical interview')
+    expect(rendered!.html).toContain('https://app.example.com/dashboard/interviews/interview-1')
+    expect(rendered!.text).toContain('Staff Engineer')
   })
 
   it('rolls several events into one digest email', () => {
@@ -49,12 +52,14 @@ describe('notification templates', () => {
       items: [
         { type: 'application_created', payload: { candidateName: 'A', jobTitle: 'Role 1' }, applicationUrl: 'https://x/1' },
         { type: 'candidate_replied', payload: { candidateName: 'B', jobTitle: 'Role 2', preview: 'Thanks' }, applicationUrl: 'https://x/2' },
+        { type: 'interview_response', payload: { candidateName: 'C', jobTitle: 'Role 3', interviewTitle: 'Screening', response: 'accepted' }, applicationUrl: 'https://x/3' },
       ],
       dashboardUrl: 'https://x/dashboard',
     })
-    expect(digest!.subject).toContain('2 updates')
+    expect(digest!.subject).toContain('3 updates')
     expect(digest!.html).toContain('Role 1')
     expect(digest!.html).toContain('Role 2')
+    expect(digest!.html).toContain('Screening')
     expect(digest!.html).toContain('https://x/dashboard')
   })
 
@@ -70,6 +75,13 @@ describe('notification templates', () => {
         applicationUrl: 'https://x/app',
       }],
       dashboardUrl: 'https://x/dashboard',
+    })).toBeNull()
+    expect(renderNotification('interview_response', {
+      candidateName: 'Jane',
+      jobTitle: 'Engineer',
+      interviewTitle: 'Screening',
+      response: 'pending',
+      interviewUrl: 'https://x/interview',
     })).toBeNull()
   })
 })

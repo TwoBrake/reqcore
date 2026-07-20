@@ -60,7 +60,7 @@ const DEMO_ORG_SLUG = "reqcore-demo";
 const DEMO_NOTIFICATION_TYPES = [
   "candidate_replied",
   "application_created",
-  "analysis_completed",
+  "interview_response",
 ] as const;
 
 // Legacy values from the old applirank.com domain — cleaned up on seed

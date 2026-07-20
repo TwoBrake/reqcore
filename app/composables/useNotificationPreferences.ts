@@ -9,10 +9,10 @@ export interface NotificationPreference {
  * Composable for reading and updating the current user's recruiter notification
  * preferences for the active organization.
  */
-export function useNotificationPreferences() {
+export async function useNotificationPreferences() {
   const { handlePreviewReadOnlyError } = usePreviewReadOnly()
 
-  const { data: preferences, status, error, refresh } = useFetch<NotificationPreference[]>(
+  const { data: preferences, status, error, refresh } = await useFetch<NotificationPreference[]>(
     '/api/notification-preferences',
     {
       key: 'notification-preferences',

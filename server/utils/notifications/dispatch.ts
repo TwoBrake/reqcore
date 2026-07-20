@@ -4,7 +4,7 @@ import { emailSuppression, notificationOutbox } from '../../database/schema/app'
 import { isServerFeatureEnabled } from '../featureFlags'
 import { sendNotificationEmail } from '../email'
 import { renderDigest, renderNotification } from './templates'
-import { applicationUrl, dashboardUrl, inboxConversationUrl } from './urls'
+import { applicationUrl, dashboardUrl, inboxConversationUrl, interviewUrl } from './urls'
 import type { NotificationType } from '~~/shared/notifications'
 
 const MAX_ATTEMPTS = 6
@@ -56,6 +56,9 @@ function mergeResults(a: NotificationDispatchResult, b: NotificationDispatchResu
 
 function rowApplicationUrl(row: OutboxRow): string {
   const payload = row.payload as Record<string, unknown>
+  if (row.type === 'interview_response') {
+    return interviewUrl(String(payload.interviewId ?? ''))
+  }
   if (row.type === 'candidate_replied' && payload.conversationId) {
     return inboxConversationUrl(String(payload.conversationId))
   }
@@ -63,7 +66,12 @@ function rowApplicationUrl(row: OutboxRow): string {
 }
 
 function enrichPayload(row: OutboxRow): Record<string, unknown> {
-  return { ...(row.payload as Record<string, unknown>), applicationUrl: rowApplicationUrl(row) }
+  const targetUrl = rowApplicationUrl(row)
+  return {
+    ...(row.payload as Record<string, unknown>),
+    applicationUrl: targetUrl,
+    interviewUrl: targetUrl,
+  }
 }
 
 async function featureEnabled(organizationId: string): Promise<boolean> {

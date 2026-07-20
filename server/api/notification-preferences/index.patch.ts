@@ -1,7 +1,12 @@
 import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { notificationPreference } from '../../database/schema'
-import { DEFAULT_CHANNEL_MODE, NOTIFICATION_TYPES } from '~~/shared/notifications'
+import {
+  DEFAULT_CHANNEL_MODE,
+  NOTIFICATION_TYPES,
+  isNotificationChannelModeAllowed,
+  normalizeNotificationChannelMode,
+} from '~~/shared/notifications'
 import { isDemoAccountEmail } from '../../utils/demoOrg'
 
 const bodySchema = z.object({
@@ -9,6 +14,16 @@ const bodySchema = z.object({
     type: z.enum(NOTIFICATION_TYPES),
     channelMode: z.enum(['instant', 'digest', 'off']),
   })).min(1),
+}).superRefine(({ preferences }, ctx) => {
+  preferences.forEach((preference, index) => {
+    if (!isNotificationChannelModeAllowed(preference.type, preference.channelMode)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['preferences', index, 'channelMode'],
+        message: `${preference.channelMode} delivery is not available for ${preference.type}`,
+      })
+    }
+  })
 })
 
 /**
@@ -54,6 +69,6 @@ export default defineEventHandler(async (event) => {
 
   return NOTIFICATION_TYPES.map(type => ({
     type,
-    channelMode: byType.get(type) ?? DEFAULT_CHANNEL_MODE[type],
+    channelMode: normalizeNotificationChannelMode(type, byType.get(type) ?? DEFAULT_CHANNEL_MODE[type]),
   }))
 })

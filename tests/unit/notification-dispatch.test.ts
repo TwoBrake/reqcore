@@ -110,6 +110,31 @@ describe('runNotificationDispatch', () => {
     expect(setCalls[1]).toMatchObject({ status: 'sent', providerMessageId: 'prov_1' })
   })
 
+  it('links invitation responses directly to the interview', async () => {
+    vi.stubGlobal('env', { NOTIFICATIONS_ENABLED: true, BETTER_AUTH_URL: 'https://app.example.com' })
+    const row = pendingRow({
+      type: 'interview_response',
+      payload: {
+        interviewId: 'interview1',
+        candidateName: 'Jane',
+        jobTitle: 'Engineer',
+        interviewTitle: 'Technical interview',
+        response: 'accepted',
+      },
+    })
+    const { db } = makeDb([[{ id: row.id }], [], []], [[row]])
+    vi.stubGlobal('db', db)
+    sendMock.mockResolvedValue({ providerMessageId: 'prov_2' })
+
+    const result = await runNotificationDispatch({ source: 'interactive' })
+
+    expect(result.sent).toBe(1)
+    expect(sendMock).toHaveBeenCalledWith(expect.objectContaining({
+      html: expect.stringContaining('https://app.example.com/dashboard/interviews/interview1'),
+      type: 'interview_response',
+    }))
+  })
+
   it('does not send when another worker wins the claim', async () => {
     vi.stubGlobal('env', { NOTIFICATIONS_ENABLED: true })
     const { db } = makeDb([[{ id: 'outbox_1' }], []], [[]])
