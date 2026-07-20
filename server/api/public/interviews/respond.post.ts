@@ -80,7 +80,7 @@ export default defineEventHandler(async (event) => {
       ? 'Requested another time'
       : 'Declined the interview'
 
-  const updated = await db.transaction(async (tx) => {
+  const { updated, shouldNotify } = await db.transaction(async (tx) => {
     // Serialize concurrent responses for this interview. Two flips arriving at
     // once must not both pass the change check below and double-insert a
     // response message (or double-count the unread badge).
@@ -95,9 +95,12 @@ export default defineEventHandler(async (event) => {
 
     if (!current || current.candidateResponse === action) {
       return {
-        id: payload.id,
-        candidateResponse: current?.candidateResponse ?? action,
-        candidateRespondedAt: current?.candidateRespondedAt ?? respondedAt,
+        updated: {
+          id: payload.id,
+          candidateResponse: current?.candidateResponse ?? action,
+          candidateRespondedAt: current?.candidateRespondedAt ?? respondedAt,
+        },
+        shouldNotify: false,
       }
     }
 
@@ -150,20 +153,19 @@ export default defineEventHandler(async (event) => {
         }).where(eq(candidateConversation.id, conversation.id))
       }
     }
-    if (result && app?.candidate && app.job) {
-      await enqueueInterviewResponseNotification({
-        organizationId: interviewRecord.organizationId,
-        interviewId: interviewRecord.id,
-        candidateName: `${app.candidate.firstName} ${app.candidate.lastName}`.trim() || app.candidate.email,
-        jobTitle: app.job.title,
-        interviewTitle: interviewRecord.title,
-        response: action,
-        tx,
-      })
-    }
-
-    return result
+    return { updated: result, shouldNotify: Boolean(result) }
   })
+
+  if (shouldNotify && app?.candidate && app.job) {
+    await enqueueInterviewResponseNotification({
+      organizationId: interviewRecord.organizationId,
+      interviewId: interviewRecord.id,
+      candidateName: `${app.candidate.firstName} ${app.candidate.lastName}`.trim() || app.candidate.email,
+      jobTitle: app.job.title,
+      interviewTitle: interviewRecord.title,
+      response: action,
+    })
+  }
 
   return {
     success: true,

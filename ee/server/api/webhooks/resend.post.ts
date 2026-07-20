@@ -205,7 +205,8 @@ async function processInboundMessage(
   }
   const createdAt = new Date(data.created_at)
   const bodyText = inboundTextContent(data.text, data.html)
-  const { storedMessage } = await db.transaction(async (tx) => {
+  const candidateName = `${conversation.application.candidate.firstName} ${conversation.application.candidate.lastName}`.trim()
+  const { storedMessage, shouldNotify } = await db.transaction(async (tx) => {
     const [inserted] = await tx.insert(candidateMessage).values({
       organizationId: conversation.organizationId,
       conversationId: conversation.id,
@@ -238,24 +239,24 @@ async function processInboundMessage(
         lastMessageAt: createdAt,
         updatedAt: new Date(),
       }).where(eq(candidateConversation.id, conversation.id))
-
-      const candidateName = `${conversation.application.candidate.firstName} ${conversation.application.candidate.lastName}`.trim()
-      await enqueueNotification({
-        organizationId: conversation.organizationId,
-        type: 'candidate_replied',
-        dedupeKey: `candidate_replied:${storedMessage.id}`,
-        payload: {
-          applicationId: conversation.applicationId,
-          conversationId: conversation.id,
-          candidateName,
-          jobTitle: conversation.application.job.title,
-          preview: bodyText.slice(0, 200),
-        },
-        tx,
-      })
     }
-    return { storedMessage }
+    return { storedMessage, shouldNotify: Boolean(inserted) }
   })
+
+  if (shouldNotify) {
+    await enqueueNotification({
+      organizationId: conversation.organizationId,
+      type: 'candidate_replied',
+      dedupeKey: `candidate_replied:${storedMessage.id}`,
+      payload: {
+        applicationId: conversation.applicationId,
+        conversationId: conversation.id,
+        candidateName,
+        jobTitle: conversation.application.job.title,
+        preview: bodyText.slice(0, 200),
+      },
+    })
+  }
 
   if (data.attachments.length > 0) {
     await captureInboundAttachments({

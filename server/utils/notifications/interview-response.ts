@@ -1,4 +1,3 @@
-import type { NotificationDbClient } from './recipients'
 import { enqueueNotification } from './enqueue'
 
 export type RecruiterInterviewResponse = 'accepted' | 'declined' | 'tentative'
@@ -11,7 +10,6 @@ export async function enqueueInterviewResponseNotification(params: {
   jobTitle: string
   interviewTitle: string
   response: RecruiterInterviewResponse
-  tx?: NotificationDbClient
 }): Promise<void> {
   await enqueueNotification({
     organizationId: params.organizationId,
@@ -24,6 +22,5 @@ export async function enqueueInterviewResponseNotification(params: {
       interviewTitle: params.interviewTitle,
       response: params.response,
     },
-    tx: params.tx,
   })
 }

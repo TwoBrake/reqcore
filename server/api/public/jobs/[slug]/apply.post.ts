@@ -420,30 +420,27 @@ export default defineEventHandler(async (event) => {
   // ─────────────────────────────────────────────
 
   const [newApplication] = await db.transaction(async (tx) => {
-    const inserted = await tx.insert(application).values({
+    return tx.insert(application).values({
       organizationId: orgId,
       candidateId,
       jobId,
       status: 'new',
       coverLetterText: coverLetterText || null,
     }).returning({ id: application.id })
-
-    const row = inserted[0]
-    if (row) {
-      await enqueueNotification({
-        organizationId: orgId,
-        type: 'application_created',
-        dedupeKey: `application_created:${row.id}`,
-        payload: {
-          applicationId: row.id,
-          candidateName: `${firstName} ${lastName}`.trim(),
-          jobTitle: existingJob.title,
-        },
-        tx,
-      })
-    }
-    return inserted
   })
+
+  if (newApplication) {
+    await enqueueNotification({
+      organizationId: orgId,
+      type: 'application_created',
+      dedupeKey: `application_created:${newApplication.id}`,
+      payload: {
+        applicationId: newApplication.id,
+        candidateName: `${firstName} ${lastName}`.trim(),
+        jobTitle: existingJob.title,
+      },
+    })
+  }
 
   // ─────────────────────────────────────────────
   // 8b. Record source attribution

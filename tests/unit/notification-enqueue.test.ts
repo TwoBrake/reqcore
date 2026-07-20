@@ -64,22 +64,29 @@ describe('enqueueNotification', () => {
     expect((digest.nextAttemptAt as Date).toISOString()).toBe(`${digest.digestBucket}T08:00:00.000Z`)
   })
 
-  it('propagates failures when participating in a domain transaction', async () => {
+  it('logs and swallows recipient resolution failures', async () => {
     recipientsMock.mockRejectedValue(new Error('database unavailable'))
-    const tx = {} as never
+    vi.stubGlobal('db', {})
 
     await expect(enqueueNotification({
       organizationId: 'org1',
       type: 'candidate_replied',
       dedupeKey: 'candidate_replied:m1',
       payload: {},
-      tx,
-    })).rejects.toThrow('database unavailable')
+    })).resolves.toBeUndefined()
+    expect(logWarn).toHaveBeenCalledWith('notification.enqueue_failed', expect.any(Object))
   })
 
-  it('logs and swallows failures outside a transaction', async () => {
-    recipientsMock.mockRejectedValue(new Error('database unavailable'))
-    vi.stubGlobal('db', {})
+  it('logs and swallows outbox insertion failures', async () => {
+    vi.stubGlobal('db', {
+      insert: () => ({
+        values: () => ({
+          onConflictDoNothing: async () => {
+            throw new Error('database unavailable')
+          },
+        }),
+      }),
+    })
 
     await expect(enqueueNotification({
       organizationId: 'org1',
@@ -95,6 +102,7 @@ describe('enqueueNotification', () => {
       { userId: 'u1', email: 'one@example.com', cadence: 'instant' },
     ])
     const { db, stored } = insertionDb()
+    vi.stubGlobal('db', db)
 
     await enqueueInterviewResponseNotification({
       organizationId: 'org1',
@@ -103,7 +111,6 @@ describe('enqueueNotification', () => {
       jobTitle: 'Engineer',
       interviewTitle: 'Technical interview',
       response: 'accepted',
-      tx: db as never,
     })
 
     expect(stored.get('interview_response:interview1:accepted:u1')).toMatchObject({
