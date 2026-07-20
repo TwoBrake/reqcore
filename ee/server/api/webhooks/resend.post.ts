@@ -22,13 +22,13 @@ import {
   normalizeEmailAddress,
   parseReferences,
 } from '../../utils/candidate-messaging'
-import { requireCandidateMessagingConfig } from '../../utils/candidate-messaging-config'
 import {
   CandidateMessageAttachmentError,
   shouldStoreInboundAttachment,
   validateCandidateMessageAttachments,
   type ValidatedCandidateMessageAttachment,
 } from '../../utils/candidate-message-attachments'
+import { requireCandidateMessagingConfig } from '../../utils/candidate-messaging-config'
 
 const STATUS_BY_EVENT = {
   'email.sent': 'sent',
@@ -52,7 +52,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Missing webhook payload or signature headers' })
   }
 
-  const resend = getResendClient()
+  const resend = getResendReceivingClient() ?? getResendClient()
   if (!resend) throw createError({ statusCode: 503, statusMessage: 'Resend is not configured' })
 
   let verified: WebhookEventPayload

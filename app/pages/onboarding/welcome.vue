@@ -72,6 +72,37 @@ watch(stepIndex, (index) => {
   })
 }, { immediate: true })
 
+const isLastStep = computed(() => stepIndex.value === total - 1)
+
+function answeredEntries() {
+  return Object.fromEntries(
+    questions.filter(q => answers[q.id]).map(q => [q.id, answers[q.id]]),
+  )
+}
+
+// Persist the answers gathered so far. Fired after every choice/skip so an
+// abandoned survey leaves partial rows instead of nothing; `completed: true`
+// only on the final step. Fire-and-forget — a save must never block advancing.
+async function saveProgress(completed = false) {
+  try {
+    await $fetch('/api/onboarding-survey', {
+      method: 'POST',
+      body: {
+        answers: answeredEntries(),
+        plan: planId.value ?? undefined,
+        billing: cadence.value ?? undefined,
+        completed,
+      },
+    })
+  }
+  catch (error) {
+    captureError(error, {
+      area: 'onboarding_survey',
+      action: completed ? 'save_response' : 'save_progress',
+    })
+  }
+}
+
 function advance() {
   if (stepIndex.value < total - 1) {
     stepIndex.value += 1
@@ -85,6 +116,9 @@ function advance() {
 function selectOption(value: string) {
   if (isAdvancing.value || isFinishing.value) return
   answers[question.value.id] = value
+  // The final answer is persisted by finish() as a completion; every earlier
+  // answer is saved here so a mid-survey drop-off is still captured.
+  if (!isLastStep.value) void saveProgress()
   isAdvancing.value = true
   // Frictionless, Typeform-style: a choice moves you forward. Back fixes slips.
   setTimeout(advance, 180)
@@ -96,6 +130,7 @@ function skip() {
     ...trackBase.value,
     question_id: question.value.id,
   })
+  if (!isLastStep.value) void saveProgress()
   isAdvancing.value = true
   advance()
 }
@@ -111,24 +146,9 @@ async function finish() {
 
   const answered = questions.filter(q => answers[q.id])
   const skipped = questions.filter(q => !answers[q.id])
-  const answeredEntries = Object.fromEntries(answered.map(q => [q.id, answers[q.id]]))
+  const finalAnswers = answeredEntries()
 
-  try {
-    await $fetch('/api/onboarding-survey', {
-      method: 'POST',
-      body: {
-        answers: answeredEntries,
-        plan: planId.value ?? undefined,
-        billing: cadence.value ?? undefined,
-      },
-    })
-  }
-  catch (error) {
-    captureError(error, {
-      area: 'onboarding_survey',
-      action: 'save_response',
-    })
-  }
+  await saveProgress(true)
 
   // Person properties — durable, account-level segmentation on the user's
   // PostHog profile. Only write answers that were actually given.
@@ -145,7 +165,7 @@ async function finish() {
     ...trackBase.value,
     answered_count: answered.length,
     skipped_count: skipped.length,
-    ...answeredEntries,
+    ...finalAnswers,
   })
 
   await navigateTo(destination.value)

@@ -18,6 +18,34 @@ import { isDemoOrgId, isDemoAccountEmail } from "./demoOrg";
 import * as schema from "../database/schema";
 
 /**
+ * Reads the Endorsely affiliate referral id off the incoming request cookies.
+ *
+ * The referral is captured on the marketing site (reqcore.com), where the
+ * Endorsely tracking script runs, and mirrored into an `endorsely_referral`
+ * cookie scoped to the shared `.reqcore.com` domain so it survives the hop to
+ * the app subdomain. We forward it into Stripe Checkout session metadata so
+ * Endorsely can attribute the sale (it reads the value off the
+ * `checkout.session.completed` webhook). Endorsely referral ids are UUIDs; we
+ * validate the shape to avoid writing arbitrary cookie content into Stripe.
+ */
+function readEndorselyReferral(request?: Request): string | undefined {
+  const cookieHeader = request?.headers?.get("cookie");
+  if (!cookieHeader) return undefined;
+  for (const part of cookieHeader.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim() !== "endorsely_referral") continue;
+    const value = decodeURIComponent(part.slice(eq + 1).trim());
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      value,
+    )
+      ? value
+      : undefined;
+  }
+  return undefined;
+}
+
+/**
  * Authorization guard for org-scoped billing. Subscriptions are referenced by
  * organization id; this verifies the acting user actually belongs to that org
  * (and, for any mutating action, is an owner/admin). Without this, a user could
@@ -541,10 +569,20 @@ function getAuth(): Auth {
                 subscription: {
                   enabled: true,
                   plans: buildStripePlans(env),
-                  // Let customers redeem Dashboard-managed promotion codes in Checkout.
-                  getCheckoutSessionParams: () => ({
-                    params: { allow_promotion_codes: true },
-                  }),
+                  // Let customers redeem Dashboard-managed promotion codes in
+                  // Checkout, and forward the Endorsely affiliate referral (when
+                  // present) so the sale is attributed to the referring affiliate.
+                  getCheckoutSessionParams: (_data, request) => {
+                    const endorselyReferral = readEndorselyReferral(request);
+                    return {
+                      params: {
+                        allow_promotion_codes: true,
+                        ...(endorselyReferral
+                          ? { metadata: { endorsely_referral: endorselyReferral } }
+                          : {}),
+                      },
+                    };
+                  },
                   // Subscriptions are referenced by organization id; only
                   // members (owner/admin for mutations) of that org may act.
                   authorizeReference: async ({ user, referenceId, action }) =>

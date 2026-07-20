@@ -6,7 +6,7 @@ import {
   ChevronDown, Menu, X, Users, ChevronLeft,
   LayoutDashboard, Calendar, ArrowUpCircle,
   Sparkles, Radio, History,
-  MessageCircle, Languages, Lock, Inbox,
+  MessageCircle, Languages, Lock, Inbox, Upload,
 } from 'lucide-vue-next'
 import type { PlanFeature } from '~~/shared/billing'
 
@@ -108,6 +108,7 @@ const jobTabs = computed(() => {
   return [
     { label: 'Pipeline', to: base, icon: Kanban, exact: true },
     { label: 'Table', to: `${base}/candidates`, icon: Table2, exact: true },
+    { label: 'Import', to: `${base}/import`, icon: Upload, exact: true },
     { label: 'Inbox', to: `${base}/inbox`, icon: Inbox, exact: true },
     { label: 'Application Form', to: `${base}/application-form`, icon: FileText, exact: true },
     { label: 'Source Tracking', to: `${base}/source-tracking`, icon: Radio, exact: true },
@@ -342,6 +343,14 @@ onUnmounted(() => {
               </div>
             </Transition>
           </div>
+
+          <!-- Email verification pill (only while the signed-in user is unverified) -->
+          <ClientOnly>
+            <EmailVerificationPill
+              v-if="session?.user && !session.user.emailVerified"
+              :email="session.user.email"
+            />
+          </ClientOnly>
 
           <!-- Free-plan upgrade pill (hidden in demo, which has its own CTA) -->
           <ClientOnly>

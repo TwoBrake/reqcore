@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Users, Plus, Search, Mail, Phone, ArrowUp, ArrowDown, ArrowUpDown, SlidersHorizontal, X, StickyNote, Maximize2, Minimize2, Check, ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { Users, Plus, Search, Mail, Phone, ArrowUp, ArrowDown, ArrowUpDown, SlidersHorizontal, X, StickyNote, Maximize2, Minimize2, Check, ChevronLeft, ChevronRight, UploadCloud } from 'lucide-vue-next'
 
 definePageMeta({
   layout: 'dashboard',
@@ -283,6 +283,7 @@ function onUpdateView(id: string) {
 
 // ── Candidate detail drawer ───────────────────────────────────────────────────
 const selectedCandidateId = ref<string | null>(null)
+
 </script>
 
 <template>
@@ -344,6 +345,13 @@ const selectedCandidateId = ref<string | null>(null)
         <Maximize2 v-if="!isFullscreen" class="size-4" />
         <Minimize2 v-else class="size-4" />
       </button>
+      <NuxtLink
+        :to="$localePath('/dashboard/candidates/import')"
+        class="inline-flex items-center gap-1.5 rounded-lg border border-surface-200 bg-white px-3 py-2 text-sm font-medium text-surface-600 transition-colors hover:bg-surface-50 hover:text-surface-700 dark:border-surface-800 dark:bg-surface-900 dark:text-surface-400 dark:hover:bg-surface-800 dark:hover:text-surface-200"
+      >
+        <UploadCloud class="size-4" />
+        Import CSV
+      </NuxtLink>
       <NuxtLink
         :to="$localePath('/dashboard/candidates/new')"
         class="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 transition-colors"
