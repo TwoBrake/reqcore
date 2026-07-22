@@ -726,7 +726,7 @@ function scoreClass(score: number) {
               @click="showDeleteConfirm = true"
             >
               <Trash2 class="size-3.5" />
-              Delete
+              Delete application
             </button>
           </div>
         </div>
@@ -892,7 +892,7 @@ function scoreClass(score: number) {
             <component :is="tab.icon" v-if="tab.icon" class="size-3.5" />
             {{ tab.label }}
             <span v-if="tab.count" class="text-xs tabular-nums" :class="detailTab === tab.key ? 'text-brand-500/70 dark:text-brand-400/70' : 'text-surface-400'">
-              {{ tab.count }}
+              ({{ tab.count }})
             </span>
           </button>
         </div>
