@@ -54,7 +54,9 @@ function jobGroupLabel(jobId: string): string {
   return jobTitleById.value.get(jobId) ?? 'Other job'
 }
 
-const applicationColumns = computed(() => [
+type ApplicationColumn = { key: string; label: string; required?: boolean; group?: string }
+
+const applicationColumns = computed<ApplicationColumn[]>(() => [
   { key: 'candidate', label: 'Candidate', required: true },
   { key: 'email', label: 'Email' },
   ...(props.jobId ? [] : [{ key: 'job', label: 'Job' }]),
