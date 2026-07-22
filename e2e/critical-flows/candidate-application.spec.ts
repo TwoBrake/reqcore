@@ -383,13 +383,13 @@ test.describe('Candidate Application Flow — All Custom Question Field Types', 
     // Helper: within the Responses tab, find a response card by its label and
     // assert the displayed value matches `expected`.
     async function assertResponse(questionLabel: string, expected: string | RegExp) {
-      // Each response is rendered as a <dt> (label) + <dd> (value) pair inside
-      // a card. Locate the <dd> that follows the matching <dt>.
+      // Each response is rendered as a card <div> containing two <p> elements:
+      // the first is the question label, the second is the answer value.
       const label = page.getByText(questionLabel, { exact: false }).first()
       await expect(label).toBeVisible()
-      // The value is the next sibling text node — grabbing the nearest <dd>
+      // The value is the second <p> within the same card.
       const card = label.locator('..')
-      const valueEl = card.locator('dd')
+      const valueEl = card.locator('p').last()
       if (typeof expected === 'string') {
         await expect(valueEl).toContainText(expected)
       } else {
@@ -426,7 +426,7 @@ test.describe('Candidate Application Flow — All Custom Question Field Types', 
     const fileUploadLabel = page.getByText('Cover letter document', { exact: false }).first()
     await expect(fileUploadLabel).toBeVisible()
     const fileUploadCard = fileUploadLabel.locator('..')
-    const fileUploadValue = fileUploadCard.locator('dd')
+    const fileUploadValue = fileUploadCard.locator('p').last()
     // The value should be a non-empty UUID (document ID), not the dash placeholder
     await expect(fileUploadValue).not.toHaveText('—')
     const fileIdText = await fileUploadValue.textContent()
@@ -461,8 +461,8 @@ test.describe('Candidate Application Flow — All Custom Question Field Types', 
     // Confirm the candidate info section shows the correct data
     await expect(page.getByText(APPLICANT.email).first()).toBeVisible()
 
-    // Confirm all 9 question responses are shown in the "Application Responses" section
-    await expect(page.getByText(/Application Responses\s*\(\s*9\s*\)/i)).toBeVisible()
+    // Confirm all 9 question responses are shown — the Responses tab reports the count
+    await expect(page.getByRole('button', { name: /Responses\s*\(\s*9\s*\)/i })).toBeVisible()
 
     // Spot-check a few response values on the detail page. Scope each assertion
     // to its question block so generic values such as "5" do not match hidden
@@ -470,7 +470,9 @@ test.describe('Candidate Application Flow — All Custom Question Field Types', 
     async function assertDetailResponse(questionLabel: string, expected: string) {
       const label = page.getByText(questionLabel, { exact: false }).first()
       await expect(label).toBeVisible()
-      await expect(label.locator('..').locator('dd')).toContainText(expected)
+      // Label and value render as two <p> elements inside the same card <div>;
+      // the value is the second <p>.
+      await expect(label.locator('..').locator('p').last()).toContainText(expected)
     }
 
     await assertDetailResponse('Years of experience', '5') // short_text
