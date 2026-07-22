@@ -587,7 +587,7 @@ const selectedCandidateId = ref<string | null>(null)
               <td class="px-4 py-3">
                 <button
                   type="button"
-                  class="font-semibold text-surface-900 dark:text-surface-100 group-hover:text-brand-600 transition-colors whitespace-nowrap text-left"
+                  class="font-semibold text-surface-900 dark:text-surface-100 group-hover:text-brand-600 transition-colors whitespace-nowrap text-left cursor-pointer"
                   @click.stop="selectedCandidateId = c.id"
                 >
                   {{ formatCandidateName(c) }}

@@ -31,9 +31,9 @@ const collapsed = useState('demo-upsell-collapsed', () => false)
 
       <div
         v-else
-        class="relative overflow-hidden rounded-xl border border-surface-200 bg-white shadow-2xl backdrop-blur-xl dark:border-white/[0.08] dark:bg-gradient-to-br dark:from-surface-950 dark:via-surface-900 dark:to-brand-950/90"
+        class="relative overflow-hidden rounded-xl ring-1 ring-inset ring-surface-200 bg-white shadow-2xl backdrop-blur-xl dark:ring-white/[0.08] dark:bg-surface-950 dark:bg-gradient-to-br dark:from-surface-950 dark:via-surface-900 dark:to-brand-950/90"
       >
-        <div class="h-[2px] bg-gradient-to-r from-brand-400 via-accent-400 to-brand-500" />
+        <div class="h-[2px] rounded-t-xl bg-gradient-to-r from-brand-400 via-accent-400 to-brand-500" />
 
         <div class="relative p-4">
           <div class="flex items-start gap-3">
