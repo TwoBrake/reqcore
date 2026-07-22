@@ -28,6 +28,13 @@ describe('demo account organization isolation', () => {
     expect(read('server/api/join-requests/index.post.ts')).toMatch(/The demo account cannot request access/)
   })
 
+  it('suppresses the onboarding survey (and its re-prompt banner) for the demo account', () => {
+    const surveyGet = read('server/api/onboarding-survey/index.get.ts')
+
+    expect(surveyGet).toMatch(/isDemoAccountEmail\(session\.user\.email\)/)
+    expect(surveyGet).toMatch(/return \{ completed: true \}/)
+  })
+
   it('keeps demo account email notification preferences disabled', () => {
     const seed = read('server/scripts/seed.ts')
 
