@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { application, candidateConversation, candidateMessage, interview } from '../../../database/schema'
 import { normalizeEmailAddress, replySubject } from '../../../../ee/server/utils/candidate-messaging'
 import { verifyInterviewToken } from '../../../utils/interview-token'
+import { enqueueInterviewResponseNotification } from '../../../utils/notifications/interview-response'
 
 const respondBodySchema = z.object({
   token: z.string().min(1, 'Token is required'),
@@ -54,7 +55,10 @@ export default defineEventHandler(async (event) => {
 
   const app = await db.query.application.findFirst({
     where: eq(application.id, interviewRecord.applicationId),
-    with: { candidate: { columns: { email: true } } },
+    with: {
+      candidate: { columns: { email: true, firstName: true, lastName: true } },
+      job: { columns: { title: true } },
+    },
   })
   const conversation = await db.query.candidateConversation.findFirst({
     where: and(
@@ -76,7 +80,7 @@ export default defineEventHandler(async (event) => {
       ? 'Requested another time'
       : 'Declined the interview'
 
-  const updated = await db.transaction(async (tx) => {
+  const { updated, shouldNotify } = await db.transaction(async (tx) => {
     // Serialize concurrent responses for this interview. Two flips arriving at
     // once must not both pass the change check below and double-insert a
     // response message (or double-count the unread badge).
@@ -91,9 +95,12 @@ export default defineEventHandler(async (event) => {
 
     if (!current || current.candidateResponse === action) {
       return {
-        id: payload.id,
-        candidateResponse: current?.candidateResponse ?? action,
-        candidateRespondedAt: current?.candidateRespondedAt ?? respondedAt,
+        updated: {
+          id: payload.id,
+          candidateResponse: current?.candidateResponse ?? action,
+          candidateRespondedAt: current?.candidateRespondedAt ?? respondedAt,
+        },
+        shouldNotify: false,
       }
     }
 
@@ -146,8 +153,19 @@ export default defineEventHandler(async (event) => {
         }).where(eq(candidateConversation.id, conversation.id))
       }
     }
-    return result
+    return { updated: result, shouldNotify: Boolean(result) }
   })
+
+  if (shouldNotify && app?.candidate && app.job) {
+    await enqueueInterviewResponseNotification({
+      organizationId: interviewRecord.organizationId,
+      interviewId: interviewRecord.id,
+      candidateName: `${app.candidate.firstName} ${app.candidate.lastName}`.trim() || app.candidate.email,
+      jobTitle: app.job.title,
+      interviewTitle: interviewRecord.title,
+      response: action,
+    })
+  }
 
   return {
     success: true,

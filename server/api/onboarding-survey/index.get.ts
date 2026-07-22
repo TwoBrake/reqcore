@@ -12,6 +12,12 @@ export default defineEventHandler(async (event) => {
   const session = await requireAuth(event)
   const userId = session.user.id
 
+  // The shared demo account never gets the onboarding survey (nor its
+  // re-prompt banner) — it's a read-only showcase, not a real signup.
+  if (isDemoAccountEmail(session.user.email)) {
+    return { completed: true }
+  }
+
   const row = await db.query.onboardingSurveyResponse.findFirst({
     where: eq(onboardingSurveyResponse.userId, userId),
     columns: { completedAt: true },

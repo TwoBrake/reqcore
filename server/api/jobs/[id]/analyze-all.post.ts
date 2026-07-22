@@ -1,5 +1,5 @@
-import { eq, and, isNull } from 'drizzle-orm'
-import { application, job } from '../../../database/schema'
+import { eq, and, inArray, isNull } from 'drizzle-orm'
+import { application, candidate, job } from '../../../database/schema'
 import { z } from 'zod'
 
 const paramsSchema = z.object({ id: z.string().min(1) })
@@ -24,6 +24,10 @@ export default defineEventHandler(async (event) => {
   if (!jobRecord) {
     throw createError({ statusCode: 404, statusMessage: 'Job not found' })
   }
+  const activeCandidateIds = db.select({ id: candidate.id }).from(candidate).where(and(
+    eq(candidate.organizationId, orgId),
+    isNull(candidate.quarantinedAt),
+  ))
 
   // Find all applications without scores
   const unscoredApps = await db.select({
@@ -34,6 +38,7 @@ export default defineEventHandler(async (event) => {
       eq(application.jobId, jobId),
       eq(application.organizationId, orgId),
       isNull(application.score),
+      inArray(application.candidateId, activeCandidateIds),
     ))
 
   return {

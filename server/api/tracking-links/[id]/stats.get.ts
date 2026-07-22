@@ -1,4 +1,4 @@
-import { eq, and, sql, count, gte, lte, desc } from 'drizzle-orm'
+import { eq, and, sql, count, gte, isNull, lte, desc } from 'drizzle-orm'
 import { applicationSource, application, trackingLink, job, candidate } from '../../../database/schema'
 import { trackingLinkIdSchema, sourceStatsQuerySchema } from '../../../utils/schemas/trackingLink'
 
@@ -38,7 +38,10 @@ export default defineEventHandler(async (event) => {
   }
 
   // ─── Date conditions ──────────────────────
-  const dateConditions = [eq(applicationSource.trackingLinkId, id)]
+  const dateConditions = [
+    eq(applicationSource.trackingLinkId, id),
+    isNull(candidate.quarantinedAt),
+  ]
   if (query.from) {
     dateConditions.push(gte(applicationSource.createdAt, new Date(query.from)))
   }
@@ -64,6 +67,7 @@ export default defineEventHandler(async (event) => {
       })
       .from(applicationSource)
       .innerJoin(application, eq(application.id, applicationSource.applicationId))
+      .innerJoin(candidate, eq(candidate.id, application.candidateId))
       .where(whereClause)
       .groupBy(application.status),
 
@@ -75,6 +79,7 @@ export default defineEventHandler(async (event) => {
       })
       .from(applicationSource)
       .innerJoin(application, eq(application.id, applicationSource.applicationId))
+      .innerJoin(candidate, eq(candidate.id, application.candidateId))
       .where(whereClause)
       .groupBy(sql`date_trunc('day', ${applicationSource.createdAt})::date`)
       .orderBy(sql`date_trunc('day', ${applicationSource.createdAt})::date`),
@@ -114,6 +119,7 @@ export default defineEventHandler(async (event) => {
       })
       .from(applicationSource)
       .innerJoin(application, eq(application.id, applicationSource.applicationId))
+      .innerJoin(candidate, eq(candidate.id, application.candidateId))
       .where(and(
         ...dateConditions,
         sql`${applicationSource.referrerDomain} IS NOT NULL`,
@@ -123,7 +129,16 @@ export default defineEventHandler(async (event) => {
       .limit(10),
 
     // 5. Total attributed count
-    db.$count(applicationSource, eq(applicationSource.trackingLinkId, id)),
+    db
+      .select({ count: count() })
+      .from(applicationSource)
+      .innerJoin(application, eq(application.id, applicationSource.applicationId))
+      .innerJoin(candidate, eq(candidate.id, application.candidateId))
+      .where(and(
+        eq(applicationSource.trackingLinkId, id),
+        isNull(candidate.quarantinedAt),
+      ))
+      .then(rows => Number(rows[0]?.count ?? 0)),
   ])
 
   // ─── Build funnel map ─────────────────────
@@ -134,7 +149,7 @@ export default defineEventHandler(async (event) => {
 
   // ─── Conversion rate ──────────────────────
   const cvr = link.clickCount > 0
-    ? Math.round((link.applicationCount / link.clickCount) * 100)
+    ? Math.round((totalAttributed / link.clickCount) * 100)
     : 0
 
   return {
@@ -151,7 +166,7 @@ export default defineEventHandler(async (event) => {
       utmTerm: link.utmTerm,
       utmContent: link.utmContent,
       clickCount: link.clickCount,
-      applicationCount: link.applicationCount,
+      applicationCount: totalAttributed,
       isActive: link.isActive,
       createdAt: link.createdAt,
       cvr,

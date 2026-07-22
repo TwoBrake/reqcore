@@ -6,7 +6,9 @@ import {
   candidateMessageAttachment,
   candidateMessageWebhookEvent,
 } from '~~/server/database/schema'
-import { getResendReceivingClient } from '~~/server/utils/email'
+import { enqueueNotification } from '~~/server/utils/notifications/enqueue'
+import { getResendClient, getResendReceivingClient } from '~~/server/utils/email'
+import { processNotificationStatusEvent } from '~~/server/utils/notifications/delivery-status'
 import { deleteFromS3, uploadToS3 } from '~~/server/utils/s3'
 import {
   CANDIDATE_MESSAGE_MAX_ATTACHMENT_BYTES,
@@ -38,7 +40,10 @@ const STATUS_BY_EVENT = {
 } as const
 
 export default defineEventHandler(async (event) => {
-  const { replyDomain, webhookSecret } = requireCandidateMessagingConfig()
+  const webhookSecret = env.RESEND_WEBHOOK_SECRET
+  if (!webhookSecret) {
+    throw createError({ statusCode: 503, statusMessage: 'Resend webhook is not configured' })
+  }
   const payload = await readRawBody(event, 'utf8')
   const webhookId = getHeader(event, 'svix-id')
   const timestamp = getHeader(event, 'svix-timestamp')
@@ -47,8 +52,8 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Missing webhook payload or signature headers' })
   }
 
-  const resend = getResendReceivingClient()
-  if (!resend) throw createError({ statusCode: 503, statusMessage: 'Resend Receiving is not configured' })
+  const resend = getResendReceivingClient() ?? getResendClient()
+  if (!resend) throw createError({ statusCode: 503, statusMessage: 'Resend is not configured' })
 
   let verified: WebhookEventPayload
   try {
@@ -79,6 +84,7 @@ export default defineEventHandler(async (event) => {
 
   try {
     if (verified.type === 'email.received') {
+      const { replyDomain } = requireCandidateMessagingConfig()
       await processInboundMessage(verified, replyDomain)
     } else if (verified.type in STATUS_BY_EVENT) {
       await processStatusEvent(verified as StatusWebhookEvent)
@@ -104,6 +110,13 @@ export default defineEventHandler(async (event) => {
 type StatusWebhookEvent = Extract<WebhookEventPayload, { type: keyof typeof STATUS_BY_EVENT }>
 
 async function processStatusEvent(event: StatusWebhookEvent): Promise<void> {
+  // Recruiter notifications share this webhook — route their delivery events to
+  // the outbox instead of the candidate-message table.
+  if (event.data.tags?.category === 'notification') {
+    await processNotificationStatusEvent(event)
+    return
+  }
+
   const status = STATUS_BY_EVENT[event.type]
   const eventAt = new Date(event.created_at)
   const taggedMessageId = event.data.tags?.message
@@ -154,7 +167,10 @@ async function processInboundMessage(
     where: eq(candidateConversation.replyToken, token),
     with: {
       application: {
-        with: { candidate: { columns: { email: true } } },
+        with: {
+          candidate: { columns: { email: true, firstName: true, lastName: true } },
+          job: { columns: { title: true } },
+        },
       },
     },
   })
@@ -188,38 +204,58 @@ async function processInboundMessage(
     return entry?.[1]
   }
   const createdAt = new Date(data.created_at)
-  const [inserted] = await db.insert(candidateMessage).values({
-    organizationId: conversation.organizationId,
-    conversationId: conversation.id,
-    direction: 'inbound',
-    status: 'delivered',
-    fromEmail,
-    toEmail: normalizeEmailAddress(data.to[0] ?? event.data.to[0] ?? ''),
-    subject: data.subject || event.data.subject || '(No subject)',
-    bodyText: inboundTextContent(data.text, data.html),
-    providerMessageId: data.id,
-    internetMessageId: data.message_id,
-    inReplyTo: header('in-reply-to'),
-    references: parseReferences(header('references')),
-    providerStatusAt: createdAt,
-    sentAt: createdAt,
-    deliveredAt: createdAt,
-    createdAt,
-    updatedAt: createdAt,
-  }).onConflictDoNothing().returning({ id: candidateMessage.id })
+  const bodyText = inboundTextContent(data.text, data.html)
+  const candidateName = `${conversation.application.candidate.firstName} ${conversation.application.candidate.lastName}`.trim()
+  const { storedMessage, shouldNotify } = await db.transaction(async (tx) => {
+    const [inserted] = await tx.insert(candidateMessage).values({
+      organizationId: conversation.organizationId,
+      conversationId: conversation.id,
+      direction: 'inbound',
+      status: 'delivered',
+      fromEmail,
+      toEmail: normalizeEmailAddress(data.to[0] ?? event.data.to[0] ?? ''),
+      subject: data.subject || event.data.subject || '(No subject)',
+      bodyText,
+      providerMessageId: data.id,
+      internetMessageId: data.message_id,
+      inReplyTo: header('in-reply-to'),
+      references: parseReferences(header('references')),
+      providerStatusAt: createdAt,
+      sentAt: createdAt,
+      deliveredAt: createdAt,
+      createdAt,
+      updatedAt: createdAt,
+    }).onConflictDoNothing().returning({ id: candidateMessage.id })
 
-  const storedMessage = inserted ?? await db.query.candidateMessage.findFirst({
-    where: eq(candidateMessage.providerMessageId, data.id),
-    columns: { id: true },
+    const storedMessage = inserted ?? await tx.query.candidateMessage.findFirst({
+      where: eq(candidateMessage.providerMessageId, data.id),
+      columns: { id: true },
+    })
+    if (!storedMessage) throw new Error('Inbound message could not be persisted')
+
+    if (inserted) {
+      await tx.update(candidateConversation).set({
+        unreadCount: sql`${candidateConversation.unreadCount} + 1`,
+        lastMessageAt: createdAt,
+        updatedAt: new Date(),
+      }).where(eq(candidateConversation.id, conversation.id))
+    }
+    return { storedMessage, shouldNotify: Boolean(inserted) }
   })
-  if (!storedMessage) throw new Error('Inbound message could not be persisted')
 
-  if (inserted) {
-    await db.update(candidateConversation).set({
-      unreadCount: sql`${candidateConversation.unreadCount} + 1`,
-      lastMessageAt: createdAt,
-      updatedAt: new Date(),
-    }).where(eq(candidateConversation.id, conversation.id))
+  if (shouldNotify) {
+    await enqueueNotification({
+      organizationId: conversation.organizationId,
+      type: 'candidate_replied',
+      dedupeKey: `candidate_replied:${storedMessage.id}`,
+      payload: {
+        applicationId: conversation.applicationId,
+        conversationId: conversation.id,
+        candidateName,
+        jobTitle: conversation.application.job.title,
+        preview: bodyText.slice(0, 200),
+      },
+    })
   }
 
   if (data.attachments.length > 0) {

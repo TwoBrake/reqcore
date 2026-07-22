@@ -1,5 +1,5 @@
-import { eq, and, desc } from 'drizzle-orm'
-import { application, criterionScore, analysisRun, scoringCriterion } from '../../../database/schema'
+import { eq, and, desc, inArray, isNull } from 'drizzle-orm'
+import { application, candidate, criterionScore, analysisRun, scoringCriterion } from '../../../database/schema'
 import { z } from 'zod'
 
 const paramsSchema = z.object({ id: z.string().min(1) })
@@ -13,10 +13,18 @@ export default defineEventHandler(async (event) => {
   const session = await requirePermission(event, { scoring: ['read'] })
   const orgId = session.session.activeOrganizationId
   const { id: applicationId } = await getValidatedRouterParams(event, paramsSchema.parse)
+  const activeCandidateIds = db.select({ id: candidate.id }).from(candidate).where(and(
+    eq(candidate.organizationId, orgId),
+    isNull(candidate.quarantinedAt),
+  ))
 
   // Verify application belongs to org
   const app = await db.query.application.findFirst({
-    where: and(eq(application.id, applicationId), eq(application.organizationId, orgId)),
+    where: and(
+      eq(application.id, applicationId),
+      eq(application.organizationId, orgId),
+      inArray(application.candidateId, activeCandidateIds),
+    ),
     columns: { id: true, score: true, jobId: true },
   })
   if (!app) {

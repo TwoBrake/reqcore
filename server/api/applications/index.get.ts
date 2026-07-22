@@ -30,7 +30,10 @@ export default defineEventHandler(async (event) => {
   const query = await getValidatedQuery(event, applicationQuerySchema.parse)
 
   const offset = (query.page - 1) * query.limit
-  const conditions = [eq(application.organizationId, orgId)]
+  const conditions = [
+    eq(application.organizationId, orgId),
+    isNull(candidate.quarantinedAt),
+  ]
 
   if (query.jobId) {
     conditions.push(eq(application.jobId, query.jobId))
@@ -102,7 +105,12 @@ export default defineEventHandler(async (event) => {
     ? db
         .select({ status: application.status, count: count() })
         .from(application)
-        .where(and(eq(application.organizationId, orgId), eq(application.jobId, query.jobId)))
+        .innerJoin(candidate, eq(candidate.id, application.candidateId))
+        .where(and(
+          eq(application.organizationId, orgId),
+          eq(application.jobId, query.jobId),
+          isNull(candidate.quarantinedAt),
+        ))
         .groupBy(application.status)
     : Promise.resolve([])
 

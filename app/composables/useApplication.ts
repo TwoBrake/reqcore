@@ -1,7 +1,7 @@
 import type { MaybeRefOrGetter } from 'vue'
 
 /**
- * Composable for a single application detail with update mutation.
+ * Composable for a single application detail with update and delete mutations.
  * Wraps `useFetch('/api/applications/:id')` with a reactive key.
  */
 export function useApplication(id: MaybeRefOrGetter<string>) {
@@ -36,5 +36,18 @@ export function useApplication(id: MaybeRefOrGetter<string>) {
     }
   }
 
-  return { application, status, error, refresh, updateApplication }
+  /** Permanently delete the application while leaving its candidate intact. */
+  async function deleteApplication() {
+    try {
+      await $fetch(`/api/applications/${applicationId.value}`, { method: 'DELETE' })
+    }
+    catch (error) {
+      handlePreviewReadOnlyError(error)
+      throw error
+    }
+    clearNuxtData(`application-${applicationId.value}`)
+    await refreshNuxtData('applications')
+  }
+
+  return { application, status, error, refresh, updateApplication, deleteApplication }
 }

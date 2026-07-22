@@ -1,6 +1,8 @@
 import { Resend } from 'resend'
 import nodemailer from 'nodemailer'
 import type { Transporter } from 'nodemailer'
+import { escapeHtml, renderNotificationLayout } from './notifications/templates'
+import type { NotificationType } from '~~/shared/notifications'
 
 // ─── Resend client ────────────────────────────────────────────────────────────
 
@@ -60,10 +62,17 @@ interface EmailMessage {
   icsAttachment?: Buffer
   /** Resend-only metadata tags — silently ignored by SMTP. */
   resendTags?: Array<{ name: string; value: string }>
+  /** Resend-only idempotency key — dedupes retried sends at the provider. */
+  idempotencyKey?: string
   /** Message logged to console when no provider is configured (dev fallback). */
   logFallback: string
   /** logError category used on transport failure. */
   errorCategory: string
+}
+
+/** Outcome of a transport send. `providerMessageId` is Resend-only (null for SMTP/console). */
+export interface SendEmailResult {
+  providerMessageId: string | null
 }
 
 /**
@@ -71,8 +80,9 @@ interface EmailMessage {
  * Priority: SMTP_HOST set → use SMTP. Else RESEND_API_KEY set → use Resend.
  * Otherwise logs the fallback message and returns (no error thrown).
  * Throws on transport errors so callers can decide whether to swallow them.
+ * Returns the Resend message id when available so callers can track delivery.
  */
-async function sendEmail(msg: EmailMessage): Promise<void> {
+async function sendEmail(msg: EmailMessage): Promise<SendEmailResult> {
   const from = getFromEmail()
 
   // 1. SMTP — takes priority when SMTP_HOST is configured
@@ -97,7 +107,7 @@ async function sendEmail(msg: EmailMessage): Promise<void> {
       })
       throw err
     }
-    return
+    return { providerMessageId: null }
   }
 
   // 2. Resend
@@ -107,7 +117,7 @@ async function sendEmail(msg: EmailMessage): Promise<void> {
       ? [{ filename: 'interview.ics', content: msg.icsAttachment.toString('base64'), content_type: 'text/calendar; method=REQUEST' }]
       : undefined
 
-    const { error } = await resend.emails.send({
+    const { data, error } = await resend.emails.send({
       from,
       to: [msg.to],
       subject: msg.subject,
@@ -115,7 +125,7 @@ async function sendEmail(msg: EmailMessage): Promise<void> {
       text: msg.text,
       ...(resendAttachments ? { attachments: resendAttachments } : {}),
       ...(msg.resendTags ? { tags: msg.resendTags } : {}),
-    })
+    }, msg.idempotencyKey ? { idempotencyKey: msg.idempotencyKey } : undefined)
 
     if (error) {
       logError(msg.errorCategory, {
@@ -124,11 +134,45 @@ async function sendEmail(msg: EmailMessage): Promise<void> {
       })
       throw new Error(error.message)
     }
-    return
+    return { providerMessageId: data?.id ?? null }
   }
 
   // 3. No provider configured — dev/test fallback
   console.info(`[Reqcore] ${msg.logFallback}`)
+  return { providerMessageId: null }
+}
+
+/**
+ * Send a recruiter notification email. Routes through the shared `sendEmail`
+ * transport (SMTP → Resend → console), tagging it `category: notification` so
+ * the Resend delivery webhook can map events back to the outbox, and passing the
+ * outbox row id as the Resend idempotency key to make retried sends safe.
+ * Returns the provider message id for the worker to persist.
+ */
+export async function sendNotificationEmail(msg: {
+  to: string
+  subject: string
+  html: string
+  text: string
+  organizationId: string
+  /** Resend `type` tag — an event type, or `digest` for the daily roll-up. */
+  type: NotificationType | 'digest'
+  idempotencyKey: string
+}): Promise<SendEmailResult> {
+  return sendEmail({
+    to: msg.to,
+    subject: msg.subject,
+    html: msg.html,
+    text: msg.text,
+    idempotencyKey: msg.idempotencyKey,
+    resendTags: [
+      { name: 'category', value: 'notification' },
+      { name: 'organization', value: msg.organizationId },
+      { name: 'type', value: msg.type },
+    ],
+    logFallback: `Notification email (${msg.type}) → ${msg.to} | ${msg.subject}`,
+    errorCategory: 'email.notification_send_failed',
+  })
 }
 
 export interface CandidateMessageEmailResult {
@@ -328,65 +372,18 @@ function buildInvitationHtml(params: {
 }): string {
   const { inviterName, organizationName, role, inviteLink } = params
 
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>You're invited to ${escapeHtml(organizationName)}</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f5;padding:40px 20px;">
-    <tr>
-      <td align="center">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background-color:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e4e4e7;">
-          <!-- Header -->
-          <tr>
-            <td style="padding:32px 32px 24px;text-align:center;border-bottom:1px solid #f4f4f5;">
-              <h1 style="margin:0;font-size:20px;font-weight:600;color:#09090b;">Reqcore</h1>
-            </td>
-          </tr>
-          <!-- Body -->
-          <tr>
-            <td style="padding:32px;">
-              <h2 style="margin:0 0 16px;font-size:18px;font-weight:600;color:#09090b;">You've been invited</h2>
-              <p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#3f3f46;">
-                <strong>${escapeHtml(inviterName)}</strong> has invited you to join
-                <strong>${escapeHtml(organizationName)}</strong> as a <strong>${escapeHtml(role)}</strong>.
-              </p>
-              <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#3f3f46;">
-                Click the button below to accept the invitation. You'll need to sign in or create an account first.
-              </p>
-              <!-- CTA Button -->
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td align="center">
-                    <a href="${escapeHtml(inviteLink)}" target="_blank" rel="noopener noreferrer"
-                       style="display:inline-block;padding:12px 32px;background-color:#2563eb;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;border-radius:8px;line-height:1;">
-                      Accept Invitation
-                    </a>
-                  </td>
-                </tr>
-              </table>
-              <p style="margin:24px 0 0;font-size:12px;line-height:1.5;color:#71717a;">
-                This invitation expires in 48 hours. If you didn't expect this email, you can safely ignore it.
-              </p>
-            </td>
-          </tr>
-          <!-- Footer -->
-          <tr>
-            <td style="padding:16px 32px;text-align:center;border-top:1px solid #f4f4f5;background-color:#fafafa;">
-              <p style="margin:0;font-size:12px;color:#a1a1aa;">
-                Sent by Reqcore &mdash; Open-source applicant tracking
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`
+  return renderNotificationLayout({
+    title: `You're invited to ${organizationName}`,
+    heading: "You've been invited",
+    bodyHtml:
+      `<p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#3f3f46;">`
+      + `<strong>${escapeHtml(inviterName)}</strong> has invited you to join `
+      + `<strong>${escapeHtml(organizationName)}</strong> as a <strong>${escapeHtml(role)}</strong>.</p>`
+      + `<p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#3f3f46;">`
+      + `Click the button below to accept the invitation. You'll need to sign in or create an account first.</p>`,
+    cta: { label: 'Accept Invitation', url: inviteLink },
+    note: "This invitation expires in 48 hours. If you didn't expect this email, you can safely ignore it.",
+  })
 }
 
 function buildInvitationText(params: {
@@ -410,72 +407,20 @@ function buildInvitationText(params: {
   ].join('\n')
 }
 
-/**
- * Escape HTML special characters to prevent XSS in email templates.
- */
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
 // ─────────────────────────────────────────────
 // Email verification & password reset templates
 // ─────────────────────────────────────────────
 
 function buildVerificationHtml(params: { url: string }): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Verify your email</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f5;padding:40px 20px;">
-    <tr>
-      <td align="center">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background-color:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e4e4e7;">
-          <tr>
-            <td style="padding:32px 32px 24px;text-align:center;border-bottom:1px solid #f4f4f5;">
-              <h1 style="margin:0;font-size:20px;font-weight:600;color:#09090b;">Reqcore</h1>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:32px;">
-              <h2 style="margin:0 0 16px;font-size:18px;font-weight:600;color:#09090b;">Verify your email</h2>
-              <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#3f3f46;">
-                Click the button below to verify your email address and activate your account.
-              </p>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td align="center">
-                    <a href="${escapeHtml(params.url)}" target="_blank" rel="noopener noreferrer"
-                       style="display:inline-block;padding:12px 32px;background-color:#2563eb;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;border-radius:8px;line-height:1;">
-                      Verify Email
-                    </a>
-                  </td>
-                </tr>
-              </table>
-              <p style="margin:24px 0 0;font-size:12px;line-height:1.5;color:#71717a;">
-                If you didn't create an account, you can safely ignore this email.
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:16px 32px;text-align:center;border-top:1px solid #f4f4f5;background-color:#fafafa;">
-              <p style="margin:0;font-size:12px;color:#a1a1aa;">Sent by Reqcore &mdash; Open-source applicant tracking</p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`
+  return renderNotificationLayout({
+    title: 'Verify your email',
+    heading: 'Verify your email',
+    bodyHtml:
+      `<p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#3f3f46;">`
+      + `Click the button below to verify your email address and activate your account.</p>`,
+    cta: { label: 'Verify Email', url: params.url },
+    note: "If you didn't create an account, you can safely ignore this email.",
+  })
 }
 
 function buildVerificationText(params: { url: string }): string {
@@ -492,55 +437,15 @@ function buildVerificationText(params: { url: string }): string {
 }
 
 function buildPasswordResetHtml(params: { url: string }): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Reset your password</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f5;padding:40px 20px;">
-    <tr>
-      <td align="center">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background-color:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e4e4e7;">
-          <tr>
-            <td style="padding:32px 32px 24px;text-align:center;border-bottom:1px solid #f4f4f5;">
-              <h1 style="margin:0;font-size:20px;font-weight:600;color:#09090b;">Reqcore</h1>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:32px;">
-              <h2 style="margin:0 0 16px;font-size:18px;font-weight:600;color:#09090b;">Reset your password</h2>
-              <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#3f3f46;">
-                Click the button below to reset your password. This link will expire shortly.
-              </p>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td align="center">
-                    <a href="${escapeHtml(params.url)}" target="_blank" rel="noopener noreferrer"
-                       style="display:inline-block;padding:12px 32px;background-color:#2563eb;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;border-radius:8px;line-height:1;">
-                      Reset Password
-                    </a>
-                  </td>
-                </tr>
-              </table>
-              <p style="margin:24px 0 0;font-size:12px;line-height:1.5;color:#71717a;">
-                If you didn't request a password reset, you can safely ignore this email.
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:16px 32px;text-align:center;border-top:1px solid #f4f4f5;background-color:#fafafa;">
-              <p style="margin:0;font-size:12px;color:#a1a1aa;">Sent by Reqcore &mdash; Open-source applicant tracking</p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`
+  return renderNotificationLayout({
+    title: 'Reset your password',
+    heading: 'Reset your password',
+    bodyHtml:
+      `<p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#3f3f46;">`
+      + `Click the button below to reset your password. This link will expire shortly.</p>`,
+    cta: { label: 'Reset Password', url: params.url },
+    note: "If you didn't request a password reset, you can safely ignore this email.",
+  })
 }
 
 function buildPasswordResetText(params: { url: string }): string {

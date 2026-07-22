@@ -27,4 +27,21 @@ describe('demo account organization isolation', () => {
     expect(read('server/api/invite-links/accept.post.ts')).toMatch(/The demo account cannot join other organizations/)
     expect(read('server/api/join-requests/index.post.ts')).toMatch(/The demo account cannot request access/)
   })
+
+  it('suppresses the onboarding survey (and its re-prompt banner) for the demo account', () => {
+    const surveyGet = read('server/api/onboarding-survey/index.get.ts')
+
+    expect(surveyGet).toMatch(/isDemoAccountEmail\(session\.user\.email\)/)
+    expect(surveyGet).toMatch(/return \{ completed: true \}/)
+  })
+
+  it('keeps demo account email notification preferences disabled', () => {
+    const seed = read('server/scripts/seed.ts')
+
+    expect(seed).toMatch(/disableDemoEmailNotifications\(userId, existingOrg\.id\)/)
+    expect(seed).toMatch(/disableDemoEmailNotifications\(userId, orgId\)/)
+    expect(seed).toMatch(/set: \{ channelMode: "off", updatedAt: now \}/)
+    expect(read('server/api/notification-preferences/index.get.ts')).toMatch(/isDemoAccountEmail\(session\.user\.email\)/)
+    expect(read('server/api/notification-preferences/index.patch.ts')).toMatch(/isDemoAccountEmail\(session\.user\.email\)/)
+  })
 })

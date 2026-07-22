@@ -367,6 +367,11 @@ function getPropertyValue(entity: { properties?: import('~~/shared/properties').
 
 // ── Application detail drawer ─────────────────────────────────────────────────
 const selectedApplicationId = ref<string | null>(null)
+
+async function handleApplicationDeleted() {
+  selectedApplicationId.value = null
+  await refresh()
+}
 </script>
 
 <template>
@@ -666,7 +671,7 @@ const selectedApplicationId = ref<string | null>(null)
               <td class="px-4 py-3">
                 <button
                   type="button"
-                  class="font-semibold text-surface-900 dark:text-surface-100 group-hover:text-brand-600 transition-colors whitespace-nowrap text-left"
+                  class="font-semibold text-surface-900 dark:text-surface-100 group-hover:text-brand-600 transition-colors whitespace-nowrap text-left cursor-pointer"
                   @click.stop="selectedApplicationId = app.id"
                 >
                   {{ formatPersonName(app.candidateFirstName, app.candidateLastName) }}
@@ -777,5 +782,6 @@ const selectedApplicationId = ref<string | null>(null)
     v-if="selectedApplicationId"
     :application-id="selectedApplicationId"
     @close="selectedApplicationId = null"
+    @deleted="handleApplicationDeleted"
   />
 </template>

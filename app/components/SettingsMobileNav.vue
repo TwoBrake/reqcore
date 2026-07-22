@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import {
-  Building2, Users, UserCircle, ChevronLeft, Plug, Brain, ShieldCheck, Globe, Globe2, CreditCard,
+  Building2, Users, UserCircle, ChevronLeft, Plug, Brain, ShieldCheck, Globe, Globe2, CreditCard, Bell,
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -17,6 +17,12 @@ const settingsNav = [
     label: 'Localization',
     to: '/dashboard/settings/localization',
     icon: Globe,
+    exact: true,
+  },
+  {
+    label: 'Notifications',
+    to: '/dashboard/settings/notifications',
+    icon: Bell,
     exact: true,
   },
   {

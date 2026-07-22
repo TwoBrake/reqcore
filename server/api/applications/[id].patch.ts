@@ -1,5 +1,5 @@
-import { eq, and } from 'drizzle-orm'
-import { application } from '../../database/schema'
+import { eq, and, inArray, isNull } from 'drizzle-orm'
+import { application, candidate } from '../../database/schema'
 import { applicationIdParamSchema, updateApplicationSchema, APPLICATION_STATUS_TRANSITIONS } from '../../utils/schemas/application'
 
 /**
@@ -12,10 +12,18 @@ export default defineEventHandler(async (event) => {
 
   const { id } = await getValidatedRouterParams(event, applicationIdParamSchema.parse)
   const body = await readValidatedBody(event, updateApplicationSchema.parse)
+  const activeCandidateIds = db.select({ id: candidate.id }).from(candidate).where(and(
+    eq(candidate.organizationId, orgId),
+    isNull(candidate.quarantinedAt),
+  ))
 
   // Fetch current application to validate status transition
   const current = await db.query.application.findFirst({
-    where: and(eq(application.id, id), eq(application.organizationId, orgId)),
+    where: and(
+      eq(application.id, id),
+      eq(application.organizationId, orgId),
+      inArray(application.candidateId, activeCandidateIds),
+    ),
     columns: { id: true, status: true },
   })
 
@@ -36,7 +44,11 @@ export default defineEventHandler(async (event) => {
 
   const [updated] = await db.update(application)
     .set({ ...body, updatedAt: new Date() })
-    .where(and(eq(application.id, id), eq(application.organizationId, orgId)))
+    .where(and(
+      eq(application.id, id),
+      eq(application.organizationId, orgId),
+      inArray(application.candidateId, activeCandidateIds),
+    ))
     .returning({
       id: application.id,
       candidateId: application.candidateId,

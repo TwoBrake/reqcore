@@ -1,5 +1,5 @@
-import { eq, and } from 'drizzle-orm'
-import { job } from '../../database/schema'
+import { eq, and, inArray, isNull } from 'drizzle-orm'
+import { application, candidate, job } from '../../database/schema'
 import { idParamSchema } from '../../utils/schemas/job'
 
 export default defineEventHandler(async (event) => {
@@ -7,6 +7,10 @@ export default defineEventHandler(async (event) => {
   const orgId = session.session.activeOrganizationId
 
   const { id } = await getValidatedRouterParams(event, idParamSchema.parse)
+  const activeCandidateIds = db.select({ id: candidate.id }).from(candidate).where(and(
+    eq(candidate.organizationId, orgId),
+    isNull(candidate.quarantinedAt),
+  ))
 
   const result = await db.query.job.findFirst({
     where: and(eq(job.id, id), eq(job.organizationId, orgId)),
@@ -37,6 +41,7 @@ export default defineEventHandler(async (event) => {
     with: {
       applications: {
         columns: { id: true, candidateId: true, status: true, createdAt: true },
+        where: inArray(application.candidateId, activeCandidateIds),
         limit: 100,
       },
     },

@@ -176,6 +176,16 @@ export const envSchema = z
       val => val === undefined || val === '' ? false : val === true || val === 'true',
       z.boolean().default(false),
     ),
+    /**
+     * Kill-switch for the recruiter notification engine. Fail-safe default = ON:
+     * notifications are an activation driver and are safe to send. Set to false to
+     * pause all outbox draining/digests instance-wide (checked at the top of the
+     * dispatch + digest workers). Mirrors the GDPR_CLEANUP_ENABLED idiom.
+     */
+    NOTIFICATIONS_ENABLED: z.preprocess(
+      val => val === undefined || val === '' ? true : val === true || val === 'true',
+      z.boolean().default(true),
+    ),
     // ── Platform AI gateway (optional) ──────────────────────────
     // When OPENROUTER_API_KEY is set, orgs without their own AI config fall back
     // to our platform key, routed through OpenRouter for unified billing and

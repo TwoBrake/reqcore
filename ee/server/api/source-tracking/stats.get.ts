@@ -1,4 +1,4 @@
-import { eq, and, sql, count, gte, lte, desc } from 'drizzle-orm'
+import { eq, and, sql, count, gte, isNull, lte, desc } from 'drizzle-orm'
 import { applicationSource, application, trackingLink, job, candidate } from '~~/server/database/schema'
 import { sourceStatsQuerySchema } from '~~/server/utils/schemas/trackingLink'
 
@@ -22,7 +22,10 @@ export default defineEventHandler(async (event) => {
   const query = await getValidatedQuery(event, sourceStatsQuerySchema.parse)
 
   // Build date range conditions
-  const dateConditions = [eq(applicationSource.organizationId, orgId)]
+  const dateConditions = [
+    eq(applicationSource.organizationId, orgId),
+    isNull(candidate.quarantinedAt),
+  ]
   if (query.jobId) {
     dateConditions.push(eq(application.jobId, query.jobId))
   }
@@ -56,6 +59,7 @@ export default defineEventHandler(async (event) => {
       })
       .from(applicationSource)
       .innerJoin(application, eq(application.id, applicationSource.applicationId))
+      .innerJoin(candidate, eq(candidate.id, application.candidateId))
       .where(whereClause)
       .groupBy(applicationSource.channel)
       .orderBy(sql`count(*) desc`),
@@ -69,13 +73,20 @@ export default defineEventHandler(async (event) => {
         code: trackingLink.code,
         jobTitle: job.title,
         clickCount: trackingLink.clickCount,
-        applicationCount: trackingLink.applicationCount,
+        applicationCount: count(candidate.id).as('application_count'),
         isActive: trackingLink.isActive,
       })
       .from(trackingLink)
       .leftJoin(job, eq(job.id, trackingLink.jobId))
+      .leftJoin(applicationSource, eq(applicationSource.trackingLinkId, trackingLink.id))
+      .leftJoin(application, eq(application.id, applicationSource.applicationId))
+      .leftJoin(candidate, and(
+        eq(candidate.id, application.candidateId),
+        isNull(candidate.quarantinedAt),
+      ))
       .where(eq(trackingLink.organizationId, orgId))
-      .orderBy(desc(trackingLink.applicationCount))
+      .groupBy(trackingLink.id, job.title)
+      .orderBy(desc(count(candidate.id)))
       .limit(10),
 
     // 3. Conversion funnel — application status breakdown per channel
@@ -87,6 +98,7 @@ export default defineEventHandler(async (event) => {
       })
       .from(applicationSource)
       .innerJoin(application, eq(application.id, applicationSource.applicationId))
+      .innerJoin(candidate, eq(candidate.id, application.candidateId))
       .where(whereClause)
       .groupBy(applicationSource.channel, application.status),
 
@@ -99,6 +111,7 @@ export default defineEventHandler(async (event) => {
       })
       .from(applicationSource)
       .innerJoin(application, eq(application.id, applicationSource.applicationId))
+      .innerJoin(candidate, eq(candidate.id, application.candidateId))
       .where(and(
         ...dateConditions,
         gte(applicationSource.createdAt, sql`now() - interval '30 days'`),
@@ -133,12 +146,24 @@ export default defineEventHandler(async (event) => {
       .limit(200),
 
     // 6. Total tracked applications (have a source)
-    db.$count(applicationSource, eq(applicationSource.organizationId, orgId)),
+    db
+      .select({ count: count() })
+      .from(applicationSource)
+      .innerJoin(application, eq(application.id, applicationSource.applicationId))
+      .innerJoin(candidate, eq(candidate.id, application.candidateId))
+      .where(and(
+        eq(applicationSource.organizationId, orgId),
+        isNull(candidate.quarantinedAt),
+      ))
+      .then(rows => Number(rows[0]?.count ?? 0)),
 
     // 7. Total untracked applications (no source record)
     db.execute(sql`
       SELECT count(*) as count
       FROM ${application} a
+      INNER JOIN ${candidate} c
+        ON c.id = a.candidate_id
+        AND c.quarantined_at IS NULL
       WHERE a.organization_id = ${orgId}
         AND NOT EXISTS (
           SELECT 1 FROM ${applicationSource} s
@@ -154,6 +179,7 @@ export default defineEventHandler(async (event) => {
       })
       .from(applicationSource)
       .innerJoin(application, eq(application.id, applicationSource.applicationId))
+      .innerJoin(candidate, eq(candidate.id, application.candidateId))
       .where(and(
         ...dateConditions,
         sql`${applicationSource.referrerDomain} IS NOT NULL`,

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
 import {
-  Building2, Users, UserCircle, ChevronLeft, Settings, Plug, Brain, ShieldCheck, Globe, Globe2, ShieldAlert, CreditCard, Lock,
+  Building2, Users, UserCircle, ChevronLeft, Settings, Plug, Brain, ShieldCheck, Globe, Globe2, ShieldAlert, CreditCard, Lock, Bell,
 } from 'lucide-vue-next'
 import type { PlanFeature } from '~~/shared/billing'
 
@@ -39,6 +39,13 @@ const settingsNav: SettingsNavItem[] = [
     description: 'Names & date formats',
     to: '/dashboard/settings/localization',
     icon: Globe,
+    exact: true,
+  },
+  {
+    label: 'Notifications',
+    description: 'Email alerts & digest',
+    to: '/dashboard/settings/notifications',
+    icon: Bell,
     exact: true,
   },
   {
