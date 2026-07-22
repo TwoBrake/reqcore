@@ -22,6 +22,8 @@ const props = defineProps<{
   readOnly?: boolean
   /** Visual hint that mutation is in flight. */
   saving?: boolean
+  /** Truncate long values to a single line (table/list contexts). */
+  compact?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -203,7 +205,7 @@ const isPopoverType = computed(
       :class="[{ 'opacity-60': saving }, editing && isPopoverType ? 'ring-2 ring-brand-500/30' : '']"
       @click="startEdit"
     >
-      <PropertyValueDisplay :definition="definition" :value="modelValue" />
+      <PropertyValueDisplay :definition="definition" :value="modelValue" :compact="compact" />
     </button>
 
     <!-- Edit mode -->

@@ -98,6 +98,11 @@ export const propertyListQuerySchema = z.object({
     .union([z.literal('1'), z.literal('true'), z.boolean()])
     .optional()
     .transform((v) => v === '1' || v === 'true' || v === true),
+  /** Set to "1" to return org-global + EVERY job's per-job props (used by the global applications table). */
+  allJobs: z
+    .union([z.literal('1'), z.literal('true'), z.boolean()])
+    .optional()
+    .transform((v) => v === '1' || v === 'true' || v === true),
 })
 
 export const propertyIdParamSchema = z.object({

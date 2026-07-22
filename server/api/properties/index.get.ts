@@ -1,4 +1,4 @@
-import { eq, and } from 'drizzle-orm'
+import { eq, and, sql } from 'drizzle-orm'
 import { propertyDefinition } from '../../database/schema'
 import { propertyListQuerySchema, type PropertyEntityType } from '../../utils/schemas/property'
 import { loadPropertyDefinitions } from '../../utils/properties'
@@ -11,6 +11,7 @@ import { loadPropertyDefinitions } from '../../utils/properties'
  *  - ?entityType=application            → org-global application defs
  *  - ?entityType=application&jobId=X    → org-global + per-job defs for X
  *  - ?entityType=application&jobId=X&jobOnly=1 → ONLY per-job defs for X (schema editor)
+ *  - ?entityType=application&allJobs=1  → org-global + EVERY job's per-job defs (global table)
  *
  * Reading is gated on `application: ['read']` because property definitions
  * are pure metadata and any user with pipeline access needs to render them.
@@ -39,6 +40,30 @@ export default defineEventHandler(async (event) => {
         ),
       )
       .orderBy(propertyDefinition.displayOrder, propertyDefinition.createdAt)
+    return rows
+  }
+
+  if (query.allJobs) {
+    if (query.entityType !== 'application') {
+      throw createError({
+        statusCode: 400,
+        statusMessage: 'allJobs requires entityType=application',
+      })
+    }
+    const rows = await db
+      .select()
+      .from(propertyDefinition)
+      .where(
+        and(
+          eq(propertyDefinition.organizationId, orgId),
+          eq(propertyDefinition.entityType, 'application'),
+        ),
+      )
+      .orderBy(
+        sql`${propertyDefinition.jobId} NULLS FIRST`,
+        propertyDefinition.displayOrder,
+        propertyDefinition.createdAt,
+      )
     return rows
   }
 
