@@ -11,7 +11,8 @@ type ActivityAction = typeof activityLog.$inferInsert.action
  */
 export async function recordActivity(params: {
   organizationId: string
-  actorId: string
+  /** Null for system-generated activity (e.g. application-rule auto changes). */
+  actorId: string | null
   action: ActivityAction
   resourceType: string
   resourceId: string
@@ -20,7 +21,7 @@ export async function recordActivity(params: {
   try {
     await db.insert(activityLog).values({
       organizationId: params.organizationId,
-      actorId: params.actorId,
+      actorId: params.actorId ?? null,
       action: params.action,
       resourceType: params.resourceType,
       resourceId: params.resourceId,

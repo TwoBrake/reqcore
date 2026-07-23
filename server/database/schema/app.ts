@@ -176,6 +176,15 @@ export const application = pgTable('application', {
   score: integer('score'),
   notes: text('notes'),
   coverLetterText: text('cover_letter_text'),
+  /**
+   * Snapshot of the automation rule that auto-set this application's status on
+   * submit (see server/utils/rules/applyRules.ts) — rule id/name, the action,
+   * and the ids of the responses that triggered it. Null when the status was
+   * never touched by a rule. Purely informational: surfaced as a small badge on
+   * the status and on each triggering response so recruiters can tell an
+   * automated categorization from a manual one and see why it fired.
+   */
+  autoRule: jsonb('auto_rule').$type<import('../../../shared/application-rules').RuleMatch>(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (t) => ([
@@ -699,7 +708,10 @@ export const analysisBillingModeEnum = pgEnum('analysis_billing_mode', [
 export const activityLog = pgTable('activity_log', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
-  actorId: text('actor_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  // Null actor = system-generated activity (e.g. an application-rule auto status
+  // change). Timeline endpoints left-join `user` and the UI renders these as
+  // "System", so automated actions still appear in the audit trail.
+  actorId: text('actor_id').references(() => user.id, { onDelete: 'cascade' }),
   action: activityActionEnum('action').notNull(),
   resourceType: text('resource_type').notNull(),
   resourceId: text('resource_id').notNull(),
@@ -879,6 +891,39 @@ export const scoringCriterion = pgTable('scoring_criterion', {
   index('scoring_criterion_organization_id_idx').on(t.organizationId),
   index('scoring_criterion_job_id_idx').on(t.jobId),
   uniqueIndex('scoring_criterion_job_key_idx').on(t.jobId, t.key),
+]))
+
+/**
+ * Per-job automation rules that read a candidate's application-form answers and
+ * automatically set the application status on submit ("knockout questions").
+ *
+ * `conditions` is a JSONB array of { questionId, operator, value }. The rule
+ * fires when its conditions satisfy `matchType` (all = AND, any = OR); the first
+ * enabled matching rule (by displayOrder) applies its `action`. See
+ * shared/application-rules.ts for the operator catalogue and the evaluator.
+ *
+ * Condition `questionId`s are NOT enforced by a foreign key (they live inside
+ * JSONB). Deleting a question leaves a dangling reference; the evaluator treats
+ * an unknown question as non-matching and the builder UI surfaces it for cleanup.
+ */
+export const ruleMatchTypeEnum = pgEnum('rule_match_type', ['all', 'any'])
+export const ruleActionEnum = pgEnum('rule_action', ['rejected', 'screening', 'interview'])
+
+export const applicationRule = pgTable('application_rule', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  jobId: text('job_id').notNull().references(() => job.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  matchType: ruleMatchTypeEnum('match_type').notNull().default('all'),
+  action: ruleActionEnum('action').notNull().default('rejected'),
+  enabled: boolean('enabled').notNull().default(true),
+  conditions: jsonb('conditions').$type<import('../../../shared/application-rules').RuleCondition[]>().notNull().default([]),
+  displayOrder: integer('display_order').notNull().default(0),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (t) => ([
+  index('application_rule_organization_id_idx').on(t.organizationId),
+  index('application_rule_job_id_idx').on(t.jobId),
 ]))
 
 /**
@@ -1171,6 +1216,11 @@ export const aiConfigRelations = relations(aiConfig, ({ one }) => ({
 export const scoringCriterionRelations = relations(scoringCriterion, ({ one }) => ({
   organization: one(organization, { fields: [scoringCriterion.organizationId], references: [organization.id] }),
   job: one(job, { fields: [scoringCriterion.jobId], references: [job.id] }),
+}))
+
+export const applicationRuleRelations = relations(applicationRule, ({ one }) => ({
+  organization: one(organization, { fields: [applicationRule.organizationId], references: [organization.id] }),
+  job: one(job, { fields: [applicationRule.jobId], references: [job.id] }),
 }))
 
 export const criterionScoreRelations = relations(criterionScore, ({ one }) => ({

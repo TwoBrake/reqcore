@@ -14,6 +14,7 @@ import {
 } from '../../../../utils/schemas/document'
 import { restoreCandidateForPublicApplication } from '../../../../utils/candidate-retention'
 import { enqueueNotification } from '../../../../utils/notifications/enqueue'
+import { applyRulesToApplication } from '../../../../utils/rules/applyRules'
 
 /** Rate limit: max 5 applications per IP per 15 minutes */
 const applyRateLimit = createRateLimiter({
@@ -659,10 +660,27 @@ export default defineEventHandler(async (event) => {
   }
 
   // ─────────────────────────────────────────────
-  // 12. Fire-and-forget auto AI scoring if enabled
+  // 12. Apply automation rules (auto-categorize / disqualify)
   // ─────────────────────────────────────────────
+  //
+  // Runs inline (fast, in-memory comparison) so the recruiter sees the
+  // categorized status immediately. Must run AFTER all responses — including
+  // file uploads stored in steps 10–11 — so file-based conditions see them.
+  // Never throws: applyRulesToApplication swallows its own errors.
 
-  if (existingJob.autoScoreOnApply && newApplication) {
+  let ruleMatch: Awaited<ReturnType<typeof applyRulesToApplication>> = null
+  if (newApplication) {
+    ruleMatch = await applyRulesToApplication(newApplication.id, orgId)
+  }
+
+  // ─────────────────────────────────────────────
+  // 13. Fire-and-forget auto AI scoring if enabled
+  // ─────────────────────────────────────────────
+  //
+  // Skip scoring when a rule already disqualified the applicant — no point
+  // spending AI budget on a rejected candidate.
+
+  if (existingJob.autoScoreOnApply && newApplication && ruleMatch?.action !== 'rejected') {
     autoScoreApplication(newApplication.id, orgId).catch((err) => {
       logError('application.auto_score_failed', {
         application_id: newApplication.id,
@@ -690,6 +708,7 @@ export default defineEventHandler(async (event) => {
     file_count: uploadedFiles.size,
     auto_score_enabled: !!existingJob.autoScoreOnApply,
     is_returning_candidate: !!existingCandidate,
+    auto_rule_action: ruleMatch?.action ?? null,
   })
 
   setResponseStatus(event, 201)
