@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { ALL_OPERATORS, RULE_ACTIONS } from '~~/shared/application-rules'
+import type { RuleOperator } from '~~/shared/application-rules'
 
 // ─────────────────────────────────────────────
 // Application automation rule validation schemas
@@ -7,7 +8,7 @@ import { ALL_OPERATORS, RULE_ACTIONS } from '~~/shared/application-rules'
 
 const conditionSchema = z.object({
   questionId: z.string().min(1, 'Pick a question'),
-  operator: z.enum(ALL_OPERATORS as [string, ...string[]]),
+  operator: z.enum(ALL_OPERATORS as [RuleOperator, ...RuleOperator[]]),
   // Comparison value — string, number, or list of option labels. Omitted for
   // presence operators (is_answered, is_provided, is_true, …).
   value: z.union([

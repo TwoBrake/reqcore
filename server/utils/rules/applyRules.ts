@@ -1,4 +1,4 @@
-import { eq, and, asc } from 'drizzle-orm'
+import { eq, and, asc, inArray } from 'drizzle-orm'
 import { application, applicationRule, jobQuestion, questionResponse } from '../../database/schema'
 import {
   evaluateApplicationRules,
