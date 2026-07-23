@@ -1,7 +1,7 @@
 import { eq, and } from 'drizzle-orm'
-import { application, applicationRule, job } from '../../../../database/schema'
+import { job } from '../../../../database/schema'
 import { ruleJobIdParamSchema } from '../../../../utils/schemas/applicationRule'
-import { applyRulesToApplication } from '../../../../utils/rules/applyRules'
+import { applyRulesToNewJobApplications } from '../../../../utils/rules/applyRules'
 
 /**
  * POST /api/jobs/:id/rules/run
@@ -22,42 +22,13 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'Job not found' })
   }
 
-  const enabledCount = await db.$count(
-    applicationRule,
-    and(
-      eq(applicationRule.jobId, jobId),
-      eq(applicationRule.organizationId, orgId),
-      eq(applicationRule.enabled, true),
-    ),
-  )
-  if (enabledCount === 0) {
-    return { evaluated: 0, matched: 0, byAction: {} as Record<string, number> }
-  }
-
-  const newApps = await db
-    .select({ id: application.id })
-    .from(application)
-    .where(and(
-      eq(application.jobId, jobId),
-      eq(application.organizationId, orgId),
-      eq(application.status, 'new'),
-    ))
-
-  const byAction: Record<string, number> = {}
-  let matched = 0
-  for (const app of newApps) {
-    const result = await applyRulesToApplication(app.id, orgId)
-    if (result) {
-      matched++
-      byAction[result.action] = (byAction[result.action] ?? 0) + 1
-    }
-  }
+  const result = await applyRulesToNewJobApplications(jobId, orgId)
 
   logApiRequest(event, session, 'application_rules.run', {
     job_id: jobId,
-    evaluated: newApps.length,
-    matched,
+    evaluated: result.evaluated,
+    matched: result.matched,
   })
 
-  return { evaluated: newApps.length, matched, byAction }
+  return result
 })

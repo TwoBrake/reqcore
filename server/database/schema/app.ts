@@ -708,7 +708,10 @@ export const analysisBillingModeEnum = pgEnum('analysis_billing_mode', [
 export const activityLog = pgTable('activity_log', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
-  actorId: text('actor_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  // Null actor = system-generated activity (e.g. an application-rule auto status
+  // change). Timeline endpoints left-join `user` and the UI renders these as
+  // "System", so automated actions still appear in the audit trail.
+  actorId: text('actor_id').references(() => user.id, { onDelete: 'cascade' }),
   action: activityActionEnum('action').notNull(),
   resourceType: text('resource_type').notNull(),
   resourceId: text('resource_id').notNull(),

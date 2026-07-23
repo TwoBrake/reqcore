@@ -10,7 +10,7 @@ export interface TimelineItem {
   resourceId: string
   metadata: Record<string, unknown> | null
   createdAt: string
-  actorId: string
+  actorId: string | null
   actorName: string | null
   actorEmail: string | null
   actorImage: string | null
