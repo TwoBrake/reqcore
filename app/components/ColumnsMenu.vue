@@ -2,7 +2,7 @@
 import { Columns2, Check } from 'lucide-vue-next'
 
 const props = defineProps<{
-  columns: { key: string; label: string; required?: boolean }[]
+  columns: { key: string; label: string; required?: boolean; group?: string }[]
   modelValue: Record<string, boolean>
 }>()
 
@@ -35,6 +35,25 @@ onUnmounted(() => {
 const hiddenCount = computed(() =>
   props.columns.filter(col => !col.required && !props.modelValue[col.key]).length,
 )
+
+// Flatten into a render list, inserting a group header before the first column
+// of each contiguous group (columns without a group render header-less).
+type RenderItem =
+  | { type: 'header'; key: string; label: string }
+  | { type: 'col'; key: string; col: (typeof props.columns)[number] }
+
+const renderItems = computed<RenderItem[]>(() => {
+  const items: RenderItem[] = []
+  let lastGroup: string | undefined
+  for (const col of props.columns) {
+    if (col.group && col.group !== lastGroup) {
+      items.push({ type: 'header', key: `header-${items.length}`, label: col.group })
+    }
+    lastGroup = col.group
+    items.push({ type: 'col', key: `col-${col.key}`, col })
+  }
+  return items
+})
 </script>
 
 <template>
@@ -62,27 +81,34 @@ const hiddenCount = computed(() =>
       <div class="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-surface-400 dark:text-surface-500 border-b border-surface-100 dark:border-surface-800 mb-1">
         Toggle columns
       </div>
-      <button
-        v-for="col in columns"
-        :key="col.key"
-        type="button"
-        class="flex w-full items-center gap-2.5 px-3 py-1.5 text-sm transition-colors"
-        :class="col.required
-          ? 'text-surface-400 dark:text-surface-500 cursor-not-allowed'
-          : 'text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800'"
-        :disabled="col.required"
-        @click="!col.required && toggle(col.key)"
-      >
-        <span
-          class="flex size-4 shrink-0 items-center justify-center rounded border transition-colors"
-          :class="(col.required || modelValue[col.key])
-            ? 'bg-brand-600 border-brand-600 text-white'
-            : 'border-surface-300 dark:border-surface-600'"
+      <template v-for="item in renderItems" :key="item.key">
+        <div
+          v-if="item.type === 'header'"
+          class="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-surface-400 dark:text-surface-500"
         >
-          <Check v-if="col.required || modelValue[col.key]" class="size-3" />
-        </span>
-        {{ col.label }}
-      </button>
+          {{ item.label }}
+        </div>
+        <button
+          v-else
+          type="button"
+          class="flex w-full items-center gap-2.5 px-3 py-1.5 text-sm transition-colors"
+          :class="item.col.required
+            ? 'text-surface-400 dark:text-surface-500 cursor-not-allowed'
+            : 'text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800'"
+          :disabled="item.col.required"
+          @click="!item.col.required && toggle(item.col.key)"
+        >
+          <span
+            class="flex size-4 shrink-0 items-center justify-center rounded border transition-colors"
+            :class="(item.col.required || modelValue[item.col.key])
+              ? 'bg-brand-600 border-brand-600 text-white'
+              : 'border-surface-300 dark:border-surface-600'"
+          >
+            <Check v-if="item.col.required || modelValue[item.col.key]" class="size-3" />
+          </span>
+          {{ item.col.label }}
+        </button>
+      </template>
     </div>
   </div>
 </template>

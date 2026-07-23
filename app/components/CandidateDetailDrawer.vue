@@ -82,6 +82,15 @@ async function handleDownload(docId: string) {
   }
 }
 
+// Reset transient UI state when switching to a different candidate without closing the drawer.
+watch(() => props.candidateId, () => {
+  activeTab.value = 'applications'
+  showApplyModal.value = false
+  showInterviewSidebar.value = false
+  interviewTargetApp.value = null
+  closePreview()
+})
+
 // ─── Display helpers ──────────────────────────────────────────────────────────
 
 const applicationStatusClasses: Record<string, string> = {
@@ -132,17 +141,14 @@ onUnmounted(() => {
 
 <template>
   <Teleport to="body">
-    <!-- Backdrop -->
+    <!-- Backdrop — dimmed but non-interactive so clicks pass through to the rows behind it -->
     <Transition
       enter-active-class="transition-opacity duration-200"
       leave-active-class="transition-opacity duration-150"
       enter-from-class="opacity-0"
       leave-to-class="opacity-0"
     >
-      <div
-        class="fixed inset-0 z-[55] bg-surface-900/40"
-        @click="emit('close')"
-      />
+      <div class="fixed inset-0 z-[55] bg-surface-900/40 pointer-events-none" />
     </Transition>
 
     <!-- Panel -->

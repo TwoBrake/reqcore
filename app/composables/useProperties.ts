@@ -21,21 +21,25 @@ export function useProperties(opts: {
   jobId?: MaybeRefOrGetter<string | null | undefined>
   /** When true, only fetch per-job props (used by the per-job schema editor). */
   jobOnly?: MaybeRefOrGetter<boolean>
+  /** When true, fetch org-global + EVERY job's per-job props (global applications table). */
+  allJobs?: MaybeRefOrGetter<boolean>
 }) {
   const query = computed(() => {
     const entityType = toValue(opts.entityType)
     const jobId = opts.jobId ? toValue(opts.jobId) : null
     const jobOnly = opts.jobOnly ? toValue(opts.jobOnly) : false
+    const allJobs = opts.allJobs ? toValue(opts.allJobs) : false
     return {
       entityType,
       ...(jobId ? { jobId } : {}),
       ...(jobOnly ? { jobOnly: '1' } : {}),
+      ...(allJobs ? { allJobs: '1' } : {}),
     }
   })
 
   const key = computed(() => {
     const q = query.value
-    return `properties-${q.entityType}-${q.jobId ?? 'org'}-${q.jobOnly ?? '0'}`
+    return `properties-${q.entityType}-${q.jobId ?? 'org'}-${q.jobOnly ?? '0'}-${q.allJobs ?? '0'}`
   })
 
   const { data, status, error, refresh } = useFetch<PropertyDefinition[]>('/api/properties', {

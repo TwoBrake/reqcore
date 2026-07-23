@@ -14,6 +14,8 @@ const props = defineProps<{
   entityId: string
   definition: PropertyDefinition
   value: unknown
+  /** Truncate long values to a single line instead of wrapping. */
+  compact?: boolean
 }>()
 
 const toast = useToast()
@@ -63,6 +65,7 @@ const currentValue = computed(() => localEntries.value[0]?.value ?? null)
       :definition="definition"
       :model-value="currentValue"
       :saving="savingId === definition.id"
+      :compact="compact"
       @update="handleUpdate"
     />
   </div>
