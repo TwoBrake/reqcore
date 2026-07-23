@@ -7,7 +7,7 @@ import {
   CheckCircle2, XCircle, AlertTriangle, ArrowUpDown, ListFilter,
   Maximize2, Minimize2, Brain, History, SlidersHorizontal,
   ChevronLeft, ChevronRight, UnfoldHorizontal, FoldHorizontal,
-  StickyNote, MoreHorizontal, Inbox,
+  StickyNote, MoreHorizontal, Inbox, Zap,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import type { Interview, InterviewMutationResult } from '~/composables/useInterviews'
@@ -411,6 +411,7 @@ type SwipeApplicationDetail = {
   score: number | null
   notes: string | null
   coverLetterText: string | null
+  autoRule: { ruleId: string; ruleName: string; action: string; matchedQuestionIds: string[] } | null
   createdAt: string | Date
   updatedAt: string | Date
   candidate: {
@@ -450,6 +451,14 @@ const {
 // flashing the skeleton (and header fields don't vanish/reappear). Only before
 // the very first load is this null.
 const resolvedCurrentApplication = computed(() => currentApplication.value ?? null)
+
+// The automation rule (if any) that auto-set this application's status on
+// submit, plus a lookup of which responses triggered it — drives the "Auto"
+// status badge and the per-response trigger badges.
+const autoRule = computed(() => resolvedCurrentApplication.value?.autoRule ?? null)
+function isRuleTriggerQuestion(questionId: string | undefined): boolean {
+  return !!questionId && !!autoRule.value?.matchedQuestionIds?.includes(questionId)
+}
 
 // True while what we're showing no longer belongs to the selected candidate,
 // i.e. a fetch for the newly selected candidate is still in flight.
@@ -1816,6 +1825,14 @@ function closeDocPreview() {
                           {{ currentSummary.status }}
                         </span>
                         <span
+                          v-if="resolvedCurrentApplication?.autoRule"
+                          class="inline-flex shrink-0 items-center gap-1 rounded-md bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-600 ring-1 ring-inset ring-brand-200 dark:bg-brand-950/50 dark:text-brand-400 dark:ring-brand-800"
+                          :title="`Status set automatically by rule “${resolvedCurrentApplication.autoRule.ruleName}”`"
+                        >
+                          <Zap class="size-2.5" />
+                          Auto
+                        </span>
+                        <span
                           v-if="currentSummary.score != null"
                           class="inline-flex shrink-0 items-center rounded-md px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset"
                           :class="{
@@ -2100,7 +2117,11 @@ function closeDocPreview() {
               </div>
 
               <!-- AI SCORE BREAKDOWN -->
-              <div v-if="showSection.aiAnalysis" class="mx-auto" :class="[detailWidthClass, detailTab === 'overview' ? 'mt-5' : '']">
+              <div v-if="showSection.aiAnalysis" class="space-y-3 mx-auto" :class="[detailWidthClass, detailTab === 'overview' ? 'mt-6' : '']">
+                <h2 class="text-sm font-semibold text-surface-800 dark:text-surface-200 flex items-center gap-2 mb-3">
+                  <Brain class="size-4 text-surface-400 dark:text-surface-500" />
+                  AI Analysis
+                </h2>
                 <ScoreBreakdown
                   v-if="currentSummary"
                   :application-id="currentSummary.id"
@@ -2499,10 +2520,21 @@ function closeDocPreview() {
                       v-for="response in resolvedCurrentApplication.responses"
                       :key="response.id"
                       class="px-4 py-3"
+                      :class="isRuleTriggerQuestion(response.question?.id) ? 'bg-brand-50/40 dark:bg-brand-950/20' : ''"
                     >
-                      <p class="text-[11px] font-semibold text-surface-400 dark:text-surface-500 uppercase tracking-wider mb-1">
-                        {{ response.question?.label ?? 'Unknown question' }}
-                      </p>
+                      <div class="flex flex-wrap items-center gap-2 mb-1">
+                        <p class="text-[11px] font-semibold text-surface-400 dark:text-surface-500 uppercase tracking-wider">
+                          {{ response.question?.label ?? 'Unknown question' }}
+                        </p>
+                        <span
+                          v-if="isRuleTriggerQuestion(response.question?.id)"
+                          class="inline-flex shrink-0 items-center gap-1 rounded-md bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-brand-600 ring-1 ring-inset ring-brand-200 dark:bg-brand-950/50 dark:text-brand-400 dark:ring-brand-800"
+                          :title="`This answer triggered the automation rule “${autoRule?.ruleName}”`"
+                        >
+                          <Zap class="size-2.5" />
+                          Triggered “{{ autoRule?.ruleName }}”
+                        </span>
+                      </div>
                       <p class="text-sm text-surface-700 dark:text-surface-200 leading-relaxed">
                         {{ formatResponseValue(response.value) }}
                       </p>
@@ -2523,14 +2555,12 @@ function closeDocPreview() {
               </div>
 
               <!-- PROPERTIES SECTION -->
-              <div v-if="showSection.properties && resolvedCurrentApplication" class="mx-auto" :class="[detailWidthClass, detailTab === 'overview' ? 'mt-6' : '']">
+              <div v-if="showSection.properties && resolvedCurrentApplication" class="space-y-3 mx-auto" :class="[detailWidthClass, detailTab === 'overview' ? 'mt-6' : '']">
+                <h2 class="text-sm font-semibold text-surface-800 dark:text-surface-200 flex items-center gap-2 mb-3">
+                  <SlidersHorizontal class="size-4 text-surface-400 dark:text-surface-500" />
+                  Properties
+                </h2>
                 <div class="rounded-xl border border-surface-200/80 bg-white p-4 shadow-sm shadow-surface-900/[0.03] dark:border-surface-800/60 dark:bg-surface-900 dark:shadow-none">
-                  <div class="flex items-center gap-2.5 mb-4">
-                    <div class="flex size-7 items-center justify-center rounded-lg bg-brand-50 dark:bg-brand-950/40">
-                      <SlidersHorizontal class="size-3.5 text-brand-600 dark:text-brand-400" />
-                    </div>
-                    <h3 class="text-sm font-semibold text-surface-800 dark:text-surface-200">Properties</h3>
-                  </div>
                   <PropertyBlock
                     entity-type="application"
                     :entity-id="resolvedCurrentApplication.id"

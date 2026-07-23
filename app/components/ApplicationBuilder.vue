@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import {
   Lock, Upload, FileText, GripVertical, Plus, Pencil, Trash2,
-  ChevronUp, ChevronDown,
+  ChevronUp, ChevronDown, Zap,
 } from 'lucide-vue-next'
 
 /**
@@ -523,6 +523,11 @@ function handleEditField(field: string) {
             Add a question
           </button>
         </div>
+
+        <p class="mt-4 flex items-start gap-1.5 text-xs text-surface-400 dark:text-surface-500 leading-relaxed">
+          <Zap class="size-3.5 shrink-0 mt-0.5" />
+          <span>Build custom automation and knockout rules from these questions — e.g. auto-reject a wrong answer — anytime from the role's Automation Rules tab.</span>
+        </p>
       </div>
     </div>
 

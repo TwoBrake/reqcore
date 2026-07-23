@@ -358,6 +358,20 @@
       "when": 1784538415712,
       "tag": "0050_numerous_red_wolf",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1784797852982,
+      "tag": "0051_marvelous_molly_hayes",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1784799977810,
+      "tag": "0052_application_auto_rule",
+      "breakpoints": true
     }
   ]
 }

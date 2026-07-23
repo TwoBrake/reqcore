@@ -6,7 +6,7 @@ import {
   ChevronDown, Menu, X, Users, ChevronLeft,
   LayoutDashboard, Calendar, ArrowUpCircle,
   Sparkles, Radio, History,
-  MessageCircle, Languages, Lock, Inbox, Upload,
+  MessageCircle, Languages, Lock, Inbox, Upload, Zap,
 } from 'lucide-vue-next'
 import type { PlanFeature } from '~~/shared/billing'
 
@@ -111,6 +111,7 @@ const jobTabs = computed(() => {
     { label: 'Import', to: `${base}/import`, icon: Upload, exact: true },
     { label: 'Inbox', to: `${base}/inbox`, icon: Inbox, exact: true },
     { label: 'Application Form', to: `${base}/application-form`, icon: FileText, exact: true },
+    { label: 'Automation', to: `${base}/rules`, icon: Zap, exact: true },
     { label: 'Source Tracking', to: `${base}/source-tracking`, icon: Radio, exact: true },
     { label: 'AI Analysis', to: `${base}/ai-analysis`, icon: Sparkles, exact: true },
     { label: 'Settings', to: `${base}/settings`, icon: Settings, exact: true },
