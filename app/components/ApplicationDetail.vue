@@ -900,7 +900,7 @@ function scoreClass(score: number) {
 
       <!-- Detail content -->
       <div
-        class="bg-surface-50/80 dark:bg-surface-950/80"
+        class="bg-surface-50/80 dark:bg-transparent"
         :class="detailTab === 'inbox' ? 'flex min-h-[60vh] flex-1 flex-col overflow-hidden' : 'rounded-xl'"
       >
         <!-- CANDIDATE INBOX -->

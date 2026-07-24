@@ -447,7 +447,7 @@ const inputClass = selectClass + ' min-w-0'
       </div>
 
       <!-- Sticky save bar -->
-      <div class="sticky bottom-0 z-10 mt-6 -mx-1 flex flex-wrap items-center gap-3 rounded-t-xl border-t border-surface-200 dark:border-surface-800 bg-white/90 dark:bg-surface-900/90 backdrop-blur px-4 py-3">
+      <div class="sticky bottom-0 z-10 mt-6 -mx-1 flex flex-wrap items-center gap-3 rounded-xl border border-surface-200 dark:border-surface-800 bg-white/90 dark:bg-surface-900/90 backdrop-blur px-4 py-3">
         <p v-if="validationError" class="text-xs text-danger-600 dark:text-danger-400">{{ validationError }}</p>
         <p v-else-if="isDirty" class="text-xs text-surface-500 dark:text-surface-400">You have unsaved changes.</p>
         <p v-else class="text-xs text-success-600 dark:text-success-500">All changes saved.</p>
