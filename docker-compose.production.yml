@@ -48,7 +48,9 @@ services:
       retries: 10
 
   app:
-    image: ghcr.io/reqcore-inc/reqcore:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: reqcore_app
     restart: unless-stopped
     env_file: .env
